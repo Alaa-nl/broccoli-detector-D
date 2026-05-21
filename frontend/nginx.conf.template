@@ -4,9 +4,22 @@
 # runs `envsubst` on it at startup and writes the result to
 # /etc/nginx/conf.d/default.conf.
 #
-# ${BACKEND_URL} is substituted from the environment:
-#   - docker-compose:  http://backend:8000  (compose network DNS)
-#   - Render:          set via render.yaml from the backend service
+# The proxy upstream is built from two env vars set by the entrypoint
+# hook:
+#   - ${BACKEND_HOST}  hostname of the backend service
+#   - ${BACKEND_PORT}  port number
+# We assign them to an nginx variable ($backend_upstream) and use that
+# in proxy_pass. This forces nginx to resolve the DNS at request time
+# (via the `resolver` below) instead of at startup, so the frontend
+# can boot before the backend is reachable — important on Render where
+# services come up independently.
+
+# nginx:alpine's built-in 15-local-resolvers.envsh hook reads the
+# nameserver(s) from /etc/resolv.conf and exports NGINX_LOCAL_RESOLVERS,
+# which works in both docker-compose (127.0.0.11) and Render
+# (whatever Render's container DNS is) without us hardcoding either.
+# valid=10s makes nginx re-resolve, so a backend redeploy gets picked up.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
 
 server {
     listen 80;
@@ -22,8 +35,13 @@ server {
     }
 
     # Forward API calls to the backend.
+    # Using a variable in proxy_pass forces per-request DNS resolution
+    # (via the `resolver` above) — but it also disables nginx's default
+    # URI rewriting, so we append $request_uri explicitly to preserve
+    # the full path (/api/detect, not /).
     location /api/ {
-        proxy_pass ${BACKEND_URL};
+        set $backend_upstream ${BACKEND_HOST}:${BACKEND_PORT};
+        proxy_pass http://$backend_upstream$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         client_max_body_size 15M;
@@ -31,7 +49,8 @@ server {
 
     # Forward uploaded image requests too.
     location /uploads/ {
-        proxy_pass ${BACKEND_URL};
+        set $backend_upstream ${BACKEND_HOST}:${BACKEND_PORT};
+        proxy_pass http://$backend_upstream$request_uri;
         proxy_set_header Host $host;
     }
 }
