@@ -3,13 +3,17 @@
 // estimation), and shows information about the loaded model.
 
 import { useEffect, useState } from 'react';
-import { Moon, Sun, RotateCcw, Ruler } from 'lucide-react';
+import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
 
 export default function Settings({
   darkMode,
   setDarkMode,
   cameraHeight,
   setCameraHeight,
+  confThreshold,
+  setConfThreshold,
+  aspectRatioFilter,
+  setAspectRatioFilter,
 }) {
   // Local state for the camera height input.
   // We commit it to the parent only when the user finishes typing.
@@ -39,6 +43,8 @@ export default function Settings({
     setDarkMode(false);
     setCameraHeight(1000);
     setHeightInput('1000');
+    setConfThreshold(0.40);
+    setAspectRatioFilter(true);
   }
 
   return (
@@ -118,6 +124,72 @@ export default function Settings({
           <div className="text-xs text-gray-500 dark:text-gray-400">
             Typical range: 800-1500 mm. Default: 1000 mm.
           </div>
+        </div>
+      </section>
+
+      {/* Detection sensitivity (confidence threshold). */}
+      <section className="card p-5">
+        <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-3 tracking-wider">
+          Detection Strictness
+        </h2>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <Target className="w-5 h-5 text-broccoli-600" />
+            <div className="flex-1">
+              <div className="font-semibold">
+                Minimum confidence: {(confThreshold * 100).toFixed(0)}%
+              </div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Higher = fewer false positives, but may miss some crowns.
+              </div>
+            </div>
+          </div>
+          <input
+            type="range"
+            min={0.10}
+            max={0.90}
+            step={0.05}
+            value={confThreshold}
+            onChange={(e) => setConfThreshold(parseFloat(e.target.value))}
+            className="w-full accent-broccoli-600"
+          />
+          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+            <span>10% (more boxes)</span>
+            <span>Default: 40%</span>
+            <span>90% (stricter)</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Aspect ratio (leaf) filter. */}
+      <section className="card p-5">
+        <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-3 tracking-wider">
+          Leaf Filter
+        </h2>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Leaf className="w-5 h-5 text-broccoli-600" />
+            <div>
+              <div className="font-semibold">Drop elongated boxes</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Real crowns are roughly square from above. Long boxes
+                are usually leaves.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setAspectRatioFilter(!aspectRatioFilter)}
+            aria-label="Toggle leaf filter"
+            className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ml-3 ${
+              aspectRatioFilter ? 'bg-broccoli-600' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
+                aspectRatioFilter ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
       </section>
 

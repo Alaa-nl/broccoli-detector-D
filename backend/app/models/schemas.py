@@ -70,3 +70,15 @@ class DetectionResponse(BaseModel):
         ...,
         description="Camera height used for size estimation (in mm).",
     )
+    conf_threshold: float = Field(
+        ...,
+        description="Minimum YOLO confidence used to keep a detection.",
+    )
+    aspect_ratio_filter: bool = Field(
+        ...,
+        description="Whether elongated boxes (probably leaves) were dropped.",
+    )
+    num_filtered: int = Field(
+        ...,
+        description="How many boxes the post-processing filters removed.",
+    )

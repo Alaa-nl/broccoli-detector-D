@@ -48,12 +48,17 @@ class BroccoliDetector:
             self.model = YOLO(str(self.weights_path))
 
     def predict(
-        self, image: Image.Image
+        self,
+        image: Image.Image,
+        conf_threshold: float = None,
     ) -> Tuple[List[dict], float]:
         """Run detection on one image.
 
         Args:
             image: A PIL image (RGB) loaded from the user upload.
+            conf_threshold: Optional override of the default conf
+                threshold for this single call. When None, the
+                value from the constructor is used.
 
         Returns:
             A tuple of (detections, inference_time_ms) where
@@ -63,6 +68,13 @@ class BroccoliDetector:
         # If the model could not load, return an empty result.
         if self.model is None:
             return [], 0.0
+
+        # Pick which threshold to use this call.
+        conf = (
+            conf_threshold
+            if conf_threshold is not None
+            else self.conf_threshold
+        )
 
         # Convert the PIL image to a NumPy array. YOLO accepts
         # both PIL and NumPy, but NumPy is a bit faster.
@@ -75,7 +87,7 @@ class BroccoliDetector:
         # boxes and verbose=False to keep the terminal clean.
         results = self.model.predict(
             source=img_array,
-            conf=self.conf_threshold,
+            conf=conf,
             verbose=False,
         )
 

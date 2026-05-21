@@ -11,7 +11,12 @@ import { UploadCloud, FileImage, AlertCircle, Loader2 } from 'lucide-react';
 const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
 
-export default function Upload({ cameraHeight, onDetected }) {
+export default function Upload({
+  cameraHeight,
+  confThreshold,
+  aspectRatioFilter,
+  onDetected,
+}) {
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [error, setError] = useState('');
@@ -59,6 +64,8 @@ export default function Upload({ cameraHeight, onDetected }) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('camera_height_mm', String(cameraHeight));
+    formData.append('conf_threshold', String(confThreshold));
+    formData.append('aspect_ratio_filter', String(aspectRatioFilter));
 
     try {
       const response = await fetch('/api/detect', {
@@ -181,10 +188,16 @@ export default function Upload({ cameraHeight, onDetected }) {
         )}
       </button>
 
-      <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-        Using camera height: <strong>{cameraHeight} mm</strong>{' '}
-        (change in Settings)
-      </p>
+      <div className="text-xs text-gray-500 dark:text-gray-400 text-center space-y-1">
+        <div>
+          Camera height: <strong>{cameraHeight} mm</strong>
+          {' · '}
+          Min confidence: <strong>{(confThreshold * 100).toFixed(0)}%</strong>
+          {' · '}
+          Leaf filter: <strong>{aspectRatioFilter ? 'on' : 'off'}</strong>
+        </div>
+        <div>Change these in Settings.</div>
+      </div>
     </div>
   );
 }

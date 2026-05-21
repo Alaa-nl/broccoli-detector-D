@@ -158,12 +158,25 @@ export default function Results({ detection }) {
       </section>
 
       {/* Disclaimer note about the size estimate. */}
-      <div className="card p-4 text-xs text-gray-600 dark:text-gray-400">
-        <strong>Note about size:</strong> Crown size is estimated from the
-        bounding box using a pinhole camera model with the camera at{' '}
-        {detection.camera_height_mm} mm above the ground (Intel RealSense
-        D415, 69.4° horizontal field of view). You can change the camera
-        height in Settings to calibrate the result.
+      <div className="card p-4 text-xs text-gray-600 dark:text-gray-400 space-y-2">
+        <div>
+          <strong>Size estimate:</strong> bounding box converted to mm
+          using a pinhole camera model with the camera at{' '}
+          {detection.camera_height_mm} mm above the ground (Intel RealSense
+          D415, 69.4° horizontal field of view). Change camera height in
+          Settings to calibrate.
+        </div>
+        <div>
+          <strong>Filters:</strong> minimum confidence{' '}
+          {(detection.conf_threshold * 100).toFixed(0)}% ·{' '}
+          leaf filter {detection.aspect_ratio_filter ? 'on' : 'off'}
+          {detection.num_filtered > 0 && (
+            <span>
+              {' '}· removed {detection.num_filtered} elongated box
+              {detection.num_filtered === 1 ? '' : 'es'}
+            </span>
+          )}
+        </div>
       </div>
 
       <Link to="/upload" className="btn-secondary inline-block">
