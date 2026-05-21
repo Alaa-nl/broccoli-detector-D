@@ -16,12 +16,12 @@ services:
   - type: web
     name: broccoli-backend
     runtime: docker
-    # Starter (0.5 CPU, 512 MB, no idle-sleep, persistent across requests)
-    # is needed because YOLO inference on Free (0.1 CPU) thrashes memory
-    # and causes the process to restart between requests — which loses
-    # the annotated image file before the browser can fetch it.
-    # Covered by the Hobby (legacy) plan's 750 free instance hours.
-    plan: starter
+    # Free tier is acceptable for occasional manual testing of the API.
+    # For an interactive demo, run locally with `docker compose up` —
+    # YOLO inference needs more CPU than free (0.1) or starter (0.5)
+    # comfortably provide, and free-tier instances are killed by the
+    # 5-second healthcheck timeout while inference blocks the event loop.
+    plan: free
     rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
