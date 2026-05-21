@@ -16,7 +16,12 @@ services:
   - type: web
     name: broccoli-backend
     runtime: docker
-    plan: free
+    # Starter (0.5 CPU, 512 MB, no idle-sleep, persistent across requests)
+    # is needed because YOLO inference on Free (0.1 CPU) thrashes memory
+    # and causes the process to restart between requests — which loses
+    # the annotated image file before the browser can fetch it.
+    # Covered by the Hobby (legacy) plan's 750 free instance hours.
+    plan: starter
     rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
