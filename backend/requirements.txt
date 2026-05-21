@@ -1,0 +1,21 @@
+# Python dependencies for the Broccoli Crown Detection backend.
+# All versions are pinned so the team gets the same setup
+# every time they run `pip install -r requirements.txt`.
+
+# Web framework and server.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9   # needed to accept file uploads
+
+# Deep learning model (matches Deliverable B).
+ultralytics==8.2.103
+torch==2.2.2
+torchvision==0.17.2
+
+# Image processing.
+pillow==10.4.0
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+
+# Data validation (used by FastAPI).
+pydantic==2.9.2

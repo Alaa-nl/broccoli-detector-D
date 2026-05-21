@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Model weights
+# We keep best.pt in the repo because the deployment platform
+# needs it. It is 6 MB, well below GitHub's 100 MB file limit.
+# Other large model files (alternative checkpoints) are ignored.
+backend/weights/*.pth
+# Allow best.pt explicitly:
+!backend/weights/best.pt
+
+# Uploaded images at runtime
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Environment files
+.env
+.env.local
+
+# Docker
+*.pid

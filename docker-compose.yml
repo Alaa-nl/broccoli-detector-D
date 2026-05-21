@@ -1,0 +1,32 @@
+# Docker Compose setup for the BroccoliDetect proof of concept.
+#
+# This file starts two containers:
+#   1. backend  - the FastAPI + YOLOv8n API on port 8000
+#   2. frontend - the React + Nginx UI on port 8080
+#
+# To start the whole app:
+#   docker compose up --build
+# Then open:
+#   http://localhost:8080
+
+services:
+  backend:
+    build: ./backend
+    container_name: broccoli-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the weights folder so we do not have to rebuild
+      # the image every time we update the model file.
+      - ./backend/weights:/app/weights
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: broccoli-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

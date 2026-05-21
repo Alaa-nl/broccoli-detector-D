@@ -1,0 +1,44 @@
+/*
+ * Global styles for the BroccoliDetect frontend.
+ *
+ * We use Tailwind CSS, so the three @tailwind lines below
+ * pull in all the utility classes (like p-4, bg-broccoli-500).
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth corners and soft shadow for all cards. */
+.card {
+  @apply bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700;
+}
+
+/* Primary button (green). */
+.btn-primary {
+  @apply bg-broccoli-600 hover:bg-broccoli-700 active:bg-broccoli-800
+         text-white font-semibold rounded-xl px-6 py-3
+         transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* Secondary button (outlined). */
+.btn-secondary {
+  @apply border-2 border-broccoli-600 text-broccoli-700 dark:text-broccoli-400
+         hover:bg-broccoli-50 dark:hover:bg-gray-800
+         font-semibold rounded-xl px-6 py-3 transition-colors;
+}
+
+/* The fixed bottom navigation bar. */
+.bottom-nav {
+  @apply fixed bottom-0 left-0 right-0
+         bg-white dark:bg-gray-800
+         border-t border-gray-200 dark:border-gray-700
+         flex justify-around items-center
+         py-3 z-50;
+}
+
+/* Smooth page transitions. */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
