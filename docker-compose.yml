@@ -30,3 +30,8 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    environment:
+      # Use Docker's embedded DNS so nginx can resolve "backend" by
+      # compose service name. Default (1.1.1.1) is used in production
+      # on Render with the backend's public hostname.
+      DNS_RESOLVER: 127.0.0.11

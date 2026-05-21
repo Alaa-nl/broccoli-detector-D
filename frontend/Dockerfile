@@ -23,16 +23,10 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # substituted from the environment.
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
-# Opt into nginx:alpine's 15-local-resolvers hook, which reads
-# /etc/resolv.conf and exports NGINX_LOCAL_RESOLVERS for the template.
-# Without this env var, the hook returns early and our resolver line
-# stays unfilled — nginx then refuses to start.
-ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
-
-# Provide BACKEND_HOST and BACKEND_PORT to the nginx template before
-# the envsubst step runs. We split BACKEND_HOSTPORT (set by Render
-# via render.yaml) on the colon; if absent (e.g. docker-compose),
-# fall back to the compose service name "backend:8000".
+# Provide BACKEND_SCHEME, BACKEND_HOST, BACKEND_PORT to the nginx
+# template before the envsubst step runs. Defaults match docker-compose
+# (plain HTTP to the "backend" service); Render overrides via render.yaml
+# with the public *.onrender.com URL.
 #
 # nginx:alpine sources /docker-entrypoint.d/*.envsh in the entrypoint
 # shell (so exports survive into envsubst and nginx); plain .sh files
@@ -40,11 +34,10 @@ ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 # step sorts after our 10-* prefix.
 RUN printf '%s\n' \
     '#!/bin/sh' \
-    ': "${BACKEND_HOSTPORT:=backend:8000}"' \
-    'export BACKEND_HOST="${BACKEND_HOSTPORT%%:*}"' \
-    'export BACKEND_PORT="${BACKEND_HOSTPORT##*:}"' \
-    '# If hostport had no colon, ${...##*:} returns the host; default port to 8000.' \
-    'if [ "$BACKEND_HOST" = "$BACKEND_PORT" ]; then export BACKEND_PORT=8000; fi' \
+    'export BACKEND_SCHEME="${BACKEND_SCHEME:-http}"' \
+    'export BACKEND_HOST="${BACKEND_HOST:-backend}"' \
+    'export BACKEND_PORT="${BACKEND_PORT:-8000}"' \
+    'export DNS_RESOLVER="${DNS_RESOLVER:-1.1.1.1 1.0.0.1}"' \
     > /docker-entrypoint.d/10-derive-backend-url.envsh \
     && chmod +x /docker-entrypoint.d/10-derive-backend-url.envsh
 

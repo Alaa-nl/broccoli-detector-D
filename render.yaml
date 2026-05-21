@@ -6,6 +6,11 @@
 # Two services:
 #   - backend   FastAPI + YOLOv8n
 #   - frontend  React + Nginx (proxies /api/ and /uploads/ to backend)
+#
+# Why we route the frontend → backend over the *public* URL instead of
+# Render's private network: nginx's `resolver` talks raw UDP/53, and
+# Render's private DNS isn't reachable that way. Public DNS works
+# reliably. The latency cost is negligible for this PoC.
 
 services:
   - type: web
@@ -25,12 +30,12 @@ services:
     dockerfilePath: ./Dockerfile
     autoDeploy: true
     envVars:
-      # Render resolves this to host:port on its private network
-      # (e.g. broccoli-backend:10000, plain HTTP, not exposed publicly).
-      # The frontend container's entrypoint prepends http:// to form
-      # BACKEND_URL, which nginx then substitutes into its config.
-      - key: BACKEND_HOSTPORT
-        fromService:
-          name: broccoli-backend
-          type: web
-          property: hostport
+      # Hardcoded because Render's fromService.property has no value
+      # that returns the public *.onrender.com URL. If the backend
+      # service is renamed/recreated, update these three values.
+      - key: BACKEND_SCHEME
+        value: https
+      - key: BACKEND_HOST
+        value: broccoli-backend-00na.onrender.com
+      - key: BACKEND_PORT
+        value: "443"
