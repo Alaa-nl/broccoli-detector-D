@@ -15,7 +15,9 @@ RUN apt-get update && apt-get install -y \
 # Doing this in a separate step lets Docker cache the pip install
 # layer when only the app code changes.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.txt
 
 # Copy the rest of the backend code (including the weights folder).
 COPY . .

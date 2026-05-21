@@ -1,0 +1,36 @@
+# Render Blueprint for the BroccoliDetect proof of concept.
+#
+# Deploy with: https://dashboard.render.com/blueprints
+# (Render reads this file from the repo root.)
+#
+# Two services:
+#   - backend   FastAPI + YOLOv8n
+#   - frontend  React + Nginx (proxies /api/ and /uploads/ to backend)
+
+services:
+  - type: web
+    name: broccoli-backend
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+  - type: web
+    name: broccoli-frontend
+    runtime: docker
+    plan: free
+    rootDir: frontend
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      # Render resolves this to host:port on its private network
+      # (e.g. broccoli-backend:10000, plain HTTP, not exposed publicly).
+      # The frontend container's entrypoint prepends http:// to form
+      # BACKEND_URL, which nginx then substitutes into its config.
+      - key: BACKEND_HOSTPORT
+        fromService:
+          name: broccoli-backend
+          type: web
+          property: hostport

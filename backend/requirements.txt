@@ -8,9 +8,12 @@ uvicorn[standard]==0.30.6
 python-multipart==0.0.9   # needed to accept file uploads
 
 # Deep learning model (matches Deliverable B).
+# CPU-only torch wheels (~200 MB vs ~3 GB with CUDA) — fits Render free tier
+# and is all we need since the inference target has no GPU.
+# The --extra-index-url in the Dockerfile makes these resolve.
 ultralytics==8.2.103
-torch==2.2.2
-torchvision==0.17.2
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
 
 # Image processing.
 pillow==10.4.0
