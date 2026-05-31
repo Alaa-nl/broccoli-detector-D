@@ -11,6 +11,7 @@ This route ties together all the services:
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.models.schemas import (
     BoundingBox,
@@ -77,7 +78,13 @@ async def detect_broccoli(
             detail="Detector is not loaded on the server.",
         )
 
-    raw_detections, inference_time_ms = detector.predict(
+    # Run YOLO inference on a worker thread so it does not block the
+    # event loop. The call is CPU-bound and can take hundreds of ms;
+    # offloading it keeps the server responsive (health checks, other
+    # uploads) while one detection is running. The detector serialises
+    # access to the shared model internally with a lock.
+    raw_detections, inference_time_ms = await run_in_threadpool(
+        detector.predict,
         pil_image,
         conf_threshold=conf_threshold,
     )
@@ -145,7 +152,14 @@ async def detect_broccoli(
     # --- Step 5: draw the boxes ---
     annotated_filename = f"{image_id}_annotated.jpg"
     annotated_path = UPLOAD_DIR / annotated_filename
-    draw_detections(pil_image, crowns_for_annotator, annotated_path)
+    # Drawing the boxes and JPEG-encoding the result (annotated.save)
+    # is also blocking, so offload it to a worker thread too.
+    await run_in_threadpool(
+        draw_detections,
+        pil_image,
+        crowns_for_annotator,
+        annotated_path,
+    )
 
     # --- Step 6: build the response ---
     # The frontend will call these URLs to show the images.

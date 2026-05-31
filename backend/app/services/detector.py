@@ -6,6 +6,7 @@ model-related code in one place so the rest of the app
 does not need to know about Ultralytics.
 """
 
+import threading
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -32,6 +33,16 @@ class BroccoliDetector:
         """
         self.weights_path = Path(weights_path)
         self.conf_threshold = conf_threshold
+
+        # The Ultralytics YOLO model is NOT thread-safe: its internal
+        # predictor reuses buffers/state between calls, and the Results
+        # objects it returns reference that shared state. One detector
+        # instance is shared across all requests (see main.py), and
+        # inference now runs on a worker thread (run_in_threadpool in
+        # detect.py), so two requests could otherwise call model.predict
+        # at the same time. This lock serialises access so only one call
+        # touches the model at a time.
+        self._lock = threading.Lock()
 
         # If the weights file is missing, we still want the app
         # to start so the team can develop the frontend without it.
@@ -66,6 +77,8 @@ class BroccoliDetector:
             'x1', 'y1', 'x2', 'y2', 'confidence'.
         """
         # If the model could not load, return an empty result.
+        # (No lock needed: self.model is set once at startup and only
+        # read here; we touch no shared predictor state on this path.)
         if self.model is None:
             return [], 0.0
 
@@ -80,37 +93,49 @@ class BroccoliDetector:
         # both PIL and NumPy, but NumPy is a bit faster.
         img_array = np.array(image)
 
-        # Measure how long inference takes (for the demo UI).
-        start_time = time.time()
+        # The shared YOLO model is not thread-safe, and the Results it
+        # returns alias predictor state that the next predict() call
+        # overwrites. So we hold the lock for the whole block below -
+        # the predict() call AND the loop that reads results[0].boxes -
+        # releasing it only once every box has been turned into plain
+        # Python floats via .cpu().numpy().
+        with self._lock:
+            # Measure how long inference takes (for the demo UI). The
+            # timer starts after the lock is held, so this reports pure
+            # model time and excludes any time spent waiting for another
+            # request's inference to finish.
+            start_time = time.time()
 
-        # Run the model. We pass conf to filter out low-confidence
-        # boxes and verbose=False to keep the terminal clean.
-        results = self.model.predict(
-            source=img_array,
-            conf=conf,
-            verbose=False,
-        )
+            # Run the model. We pass conf to filter out low-confidence
+            # boxes and verbose=False to keep the terminal clean.
+            results = self.model.predict(
+                source=img_array,
+                conf=conf,
+                verbose=False,
+            )
 
-        inference_time_ms = (time.time() - start_time) * 1000
+            inference_time_ms = (time.time() - start_time) * 1000
 
-        # Extract bounding boxes from the YOLO result object.
-        detections = []
-        if len(results) > 0:
-            result = results[0]
-            boxes = result.boxes
+            # Extract bounding boxes from the YOLO result object.
+            detections = []
+            if len(results) > 0:
+                result = results[0]
+                boxes = result.boxes
 
-            # Loop over each detected box.
-            for i in range(len(boxes)):
-                # xyxy gives us [x1, y1, x2, y2] in original image pixels.
-                xyxy = boxes.xyxy[i].cpu().numpy()
-                conf = float(boxes.conf[i].cpu().numpy())
+                # Loop over each detected box.
+                for i in range(len(boxes)):
+                    # xyxy gives us [x1, y1, x2, y2] in original image pixels.
+                    xyxy = boxes.xyxy[i].cpu().numpy()
+                    conf = float(boxes.conf[i].cpu().numpy())
 
-                detections.append({
-                    "x1": float(xyxy[0]),
-                    "y1": float(xyxy[1]),
-                    "x2": float(xyxy[2]),
-                    "y2": float(xyxy[3]),
-                    "confidence": conf,
-                })
+                    detections.append({
+                        "x1": float(xyxy[0]),
+                        "y1": float(xyxy[1]),
+                        "x2": float(xyxy[2]),
+                        "y2": float(xyxy[3]),
+                        "confidence": conf,
+                    })
 
+        # Lock released: `detections` now holds only plain Python floats,
+        # safe to use while another request runs inference.
         return detections, inference_time_ms
