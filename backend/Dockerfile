@@ -28,6 +28,9 @@ RUN mkdir -p uploads
 # Tell Docker which port the app uses.
 EXPOSE 8000
 
-# Start the server. We use 0.0.0.0 so it is reachable
-# from outside the container.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the server. We use 0.0.0.0 so it is reachable from outside the
+# container. --limit-concurrency caps how many requests can be in flight
+# at once so a burst of uploads can't pile up unbounded on the single
+# worker (CPU-bound inference is offloaded to a threadpool); excess
+# requests get a fast 503 instead of exhausting memory.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--limit-concurrency", "32"]

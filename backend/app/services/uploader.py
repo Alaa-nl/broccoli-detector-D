@@ -6,11 +6,18 @@ so the API route stays short and clear.
 """
 
 import uuid
+from io import BytesIO
 from pathlib import Path
 from typing import Tuple
 
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
+
+# Reject images whose decoded pixel count would blow up memory
+# (a "decompression bomb": a tiny file that expands to enormous
+# dimensions). Setting this at import time also arms Pillow's own
+# guard, which raises Image.DecompressionBombError during decode.
+Image.MAX_IMAGE_PIXELS = 25_000_000  # ~25 megapixels
 
 
 class ImageUploader:
@@ -23,6 +30,15 @@ class ImageUploader:
     # Max file size in bytes. 10 MB is enough for any field photo
     # and matches the limit shown on the Upload screen.
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+    # Max decoded image size in pixels (width * height). Bounds the
+    # memory used by .convert("RGB") and the later np.array() in the
+    # detector, independent of the on-disk file size above.
+    MAX_IMAGE_PIXELS = 25_000_000  # ~25 megapixels
+
+    # Read the upload in chunks so we can abort on an oversized body
+    # before the whole thing is buffered into memory.
+    READ_CHUNK_BYTES = 64 * 1024  # 64 KB
 
     def __init__(self, upload_dir: Path):
         """Set up the uploader with the target folder.
@@ -66,38 +82,65 @@ class ImageUploader:
                 ),
             )
 
-        # Read the file content into memory.
-        # We need the full bytes to check the size and to open
-        # the image with PIL.
-        content = await upload.read()
+        # Read the upload in chunks with a running size cap. This aborts
+        # an oversized upload before the whole body is buffered into
+        # memory, instead of reading everything first and checking the
+        # size after the fact (which would already have spent the RAM).
+        total = 0
+        chunks = []
+        while chunk := await upload.read(self.READ_CHUNK_BYTES):
+            total += len(chunk)
+            if total > self.MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="File is too large. The maximum size is 10 MB.",
+                )
+            chunks.append(chunk)
+        content = b"".join(chunks)
 
-        if len(content) > self.MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File is too large ({len(content) / 1024 / 1024:.1f} MB). "
-                    f"The maximum size is 10 MB."
-                ),
-            )
-
-        if len(content) == 0:
+        if total == 0:
             raise HTTPException(
                 status_code=400,
                 detail="The uploaded file is empty.",
             )
 
-        # Try to open the file as an image. If this fails, the
-        # file is not a real image (it just has the right extension).
+        # Open the file header to confirm it is a real image and to read
+        # its dimensions. Image.open() only parses the header (it does
+        # not decode the pixels yet), so this is cheap and safe to do
+        # before the pixel cap below.
         try:
-            from io import BytesIO
             pil_image = Image.open(BytesIO(content))
-            # Convert to RGB to make sure we can run YOLO on it
-            # (PNGs may have an alpha channel that YOLO does not like).
-            pil_image = pil_image.convert("RGB")
-        except UnidentifiedImageError:
+        except (UnidentifiedImageError, OSError):
             raise HTTPException(
                 status_code=400,
                 detail="The file is not a valid image.",
+            )
+
+        # Reject decompression bombs (tiny file, huge dimensions) before
+        # the expensive .convert("RGB") full decode, which would expand
+        # to width * height * 3 bytes in memory.
+        width, height = pil_image.size
+        if width * height > self.MAX_IMAGE_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail="Image dimensions are too large.",
+            )
+
+        # Convert to RGB to make sure we can run YOLO on it (PNGs may
+        # have an alpha channel that YOLO does not like). This is the
+        # full decode, so it is also where Pillow's own bomb guard and
+        # truncated-file errors surface.
+        try:
+            pil_image = pil_image.convert("RGB")
+        except Image.DecompressionBombError:
+            raise HTTPException(
+                status_code=413,
+                detail="Image dimensions are too large.",
+            )
+        except OSError:
+            raise HTTPException(
+                status_code=400,
+                detail="The image file is truncated or corrupt.",
             )
 
         # Build a unique image ID using uuid4 (random and short).

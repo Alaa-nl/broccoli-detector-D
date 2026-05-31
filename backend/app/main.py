@@ -6,6 +6,7 @@ The YOLOv8n model is loaded one time at startup, so the server
 does not need to load it again for every request.
 """
 
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,6 +26,91 @@ WEIGHTS_PATH = Path(__file__).parent.parent / "weights" / "best.pt"
 # Folder where uploaded images are saved.
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Hard cap on the size of any incoming request body. nginx already caps
+# the proxied path (client_max_body_size 15M), but a client can reach the
+# backend directly, so we enforce the same bound here independent of the
+# proxy. 15 MB leaves headroom above the 10 MB image limit for multipart
+# boundaries and the form fields.
+MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
+
+
+class _BodyTooLarge(Exception):
+    """Raised internally when a streamed request body exceeds the cap."""
+
+
+class BodySizeLimitMiddleware:
+    """Pure-ASGI middleware that rejects oversized request bodies with 413.
+
+    Two layers:
+      1. Fast path - trust the Content-Length header when present and
+         reject before reading a single byte of the body.
+      2. Backstop - for chunked / missing-length requests, count the body
+         bytes as they stream in and abort once the cap is exceeded.
+
+    This bounds memory independent of nginx and complements the route's
+    own streaming size check in ImageUploader.save().
+    """
+
+    def __init__(self, app, max_body_size: int):
+        self.app = app
+        self.max_body_size = max_body_size
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast path: trust Content-Length when the client sends it.
+        headers = dict(scope.get("headers", []))
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > self.max_body_size:
+                    await self._send_413(send)
+                    return
+            except ValueError:
+                pass  # Malformed header; fall through to the byte counter.
+
+        # Backstop: count bytes as the body streams in.
+        total = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal total
+            message = await receive()
+            if message["type"] == "http.request":
+                total += len(message.get("body", b""))
+                if total > self.max_body_size:
+                    raise _BodyTooLarge()
+            return message
+
+        async def tracked_send(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracked_send)
+        except _BodyTooLarge:
+            # Only safe to send our own response if the app has not
+            # already started one.
+            if not response_started:
+                await self._send_413(send)
+
+    @staticmethod
+    async def _send_413(send):
+        body = json.dumps({"detail": "Request body too large."}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
 
 
 @asynccontextmanager
@@ -83,6 +169,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Reject oversized request bodies before they are buffered. Added last so
+# it wraps the others and runs first on each incoming request.
+app.add_middleware(BodySizeLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES)
 
 # Serve uploaded and result images as static files so the frontend can show them.
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
