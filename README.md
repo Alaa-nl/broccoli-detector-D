@@ -34,7 +34,7 @@ broccoli-app/
 │   │   ├── api/            # Route handlers (detect, health)
 │   │   ├── services/       # Detector, size estimator, uploader, annotator
 │   │   └── models/         # Pydantic data shapes
-│   ├── weights/            # Put best.pt here (from Deliverable B)
+│   ├── weights/            # Trained model best.pt (from Deliverable B), included
 │   ├── uploads/            # Uploaded and annotated images (created at runtime)
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -44,7 +44,7 @@ broccoli-app/
 │   │   ├── pages/          # Home, Upload, Results, Settings, About
 │   │   └── components/     # Header, BottomNav
 │   ├── Dockerfile
-│   ├── nginx.conf
+│   ├── nginx.conf.template # Rendered to nginx.conf at container start
 │   └── package.json
 ├── docker-compose.yml      # Run both services together
 └── README.md               # You are here
@@ -52,22 +52,20 @@ broccoli-app/
 
 ## Quick start with Docker (easiest)
 
-You need Docker Desktop installed.
+You need Docker Desktop installed. The trained model ships with the
+repository at `backend/weights/best.pt`, so the app is ready to run as-is.
 
-1. Copy your trained weights file from Deliverable B into the backend:
-
-   ```bash
-   cp /path/to/broccoli-detector-B/runs/detect/yolov8n_v1/weights/best.pt \
-      backend/weights/best.pt
-   ```
-
-2. Start the whole app:
+1. Start the whole app:
 
    ```bash
    docker compose up --build
    ```
 
-3. Open your browser at:
+   This builds and runs on both Apple Silicon (arm64) and Intel (x86_64)
+   machines — pip pulls the matching PyTorch build for whichever chip
+   Docker is building on.
+
+2. Open your browser at:
 
    - Frontend (the app): http://localhost:8080
    - Backend API docs:   http://localhost:8000/docs
@@ -82,8 +80,7 @@ python3.11 -m venv .venv
 source .venv/bin/activate   # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Copy the trained model.
-cp /path/to/best.pt weights/best.pt
+# The trained model ships with the repo at weights/best.pt.
 
 # Start the dev server.
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
