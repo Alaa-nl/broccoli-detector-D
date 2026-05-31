@@ -44,6 +44,20 @@ UPLOAD_SWEEP_SECONDS = int(os.getenv("UPLOAD_SWEEP_SECONDS", "600"))   # 10 min
 # boundaries and the form fields.
 MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
 
+# CORS origins allowed to call the API from a browser. Comma-separated,
+# overridable via env. Defaults cover local dev (Vite :5173, compose :8080).
+# The deployed app calls the backend same-origin through the proxy, so CORS
+# is not exercised there; set this only if a browser must call the backend
+# cross-origin directly.
+CORS_ALLOW_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:5173,http://localhost:8080",
+    ).split(",")
+    if origin.strip()
+]
+
 
 async def _retention_sweep(upload_dir: Path, ttl: int, interval: int):
     """Periodically delete saved images older than `ttl` seconds.
@@ -210,14 +224,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow the React frontend (which runs on a different port) to call this API.
-# In a real deployment we would limit allow_origins to the real frontend URL.
+# Allow the React frontend to call this API from a browser. Origins come
+# from CORS_ALLOW_ORIGINS (see above). We never combine a wildcard origin
+# with credentials (spec-forbidden), and since nothing uses cookies or an
+# Authorization header, credentials stay off. The X-API-Key header is
+# injected by the nginx proxy server-side, so the browser only needs to
+# send Content-Type (for the multipart upload).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 # Reject oversized request bodies before they are buffered. Added last so
