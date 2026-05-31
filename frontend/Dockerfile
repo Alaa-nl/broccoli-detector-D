@@ -38,6 +38,7 @@ RUN printf '%s\n' \
     'export BACKEND_HOST="${BACKEND_HOST:-backend}"' \
     'export BACKEND_PORT="${BACKEND_PORT:-8000}"' \
     'export DNS_RESOLVER="${DNS_RESOLVER:-1.1.1.1 1.0.0.1}"' \
+    'export API_KEY="${API_KEY:-}"' \
     > /docker-entrypoint.d/10-derive-backend-url.envsh \
     && chmod +x /docker-entrypoint.d/10-derive-backend-url.envsh
 

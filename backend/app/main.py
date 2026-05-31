@@ -6,8 +6,10 @@ The YOLOv8n model is loaded one time at startup, so the server
 does not need to load it again for every request.
 """
 
+import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -27,12 +29,45 @@ WEIGHTS_PATH = Path(__file__).parent.parent / "weights" / "best.pt"
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Retention policy for saved uploads/annotated images (P0-4). Without a
+# sweep the uploads dir grows forever and every field photo stays publicly
+# downloadable indefinitely. We delete files older than UPLOAD_TTL_SECONDS,
+# checking every UPLOAD_SWEEP_SECONDS. The TTL is far longer than a request
+# so the frontend can still fetch /uploads/... after the JSON response.
+UPLOAD_TTL_SECONDS = int(os.getenv("UPLOAD_TTL_SECONDS", "3600"))      # 60 min
+UPLOAD_SWEEP_SECONDS = int(os.getenv("UPLOAD_SWEEP_SECONDS", "600"))   # 10 min
+
 # Hard cap on the size of any incoming request body. nginx already caps
 # the proxied path (client_max_body_size 15M), but a client can reach the
 # backend directly, so we enforce the same bound here independent of the
 # proxy. 15 MB leaves headroom above the 10 MB image limit for multipart
 # boundaries and the form fields.
 MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
+
+
+async def _retention_sweep(upload_dir: Path, ttl: int, interval: int):
+    """Periodically delete saved images older than `ttl` seconds.
+
+    Runs forever as a background task until cancelled at shutdown. Skips
+    dotfiles (so uploads/.gitkeep survives) and swallows per-file errors
+    (e.g. a file removed by a concurrent request) so one bad file cannot
+    kill the loop.
+    """
+    while True:
+        try:
+            now = time.time()
+            for path in upload_dir.iterdir():
+                if path.name.startswith("."):
+                    continue
+                try:
+                    if path.is_file() and now - path.stat().st_mtime > ttl:
+                        path.unlink(missing_ok=True)
+                except OSError:
+                    # File vanished or is momentarily unreadable; skip it.
+                    continue
+        except Exception as exc:  # noqa: BLE001 - keep the loop alive
+            print(f"WARNING: retention sweep failed: {exc}")
+        await asyncio.sleep(interval)
 
 
 class _BodyTooLarge(Exception):
@@ -145,9 +180,24 @@ async def lifespan(app: FastAPI):
             "Detections will return 503 until best.pt is present."
         )
 
+    # Start the background sweep that deletes old uploaded/annotated images
+    # so the disk cannot grow without bound.
+    sweep_task = asyncio.create_task(
+        _retention_sweep(UPLOAD_DIR, UPLOAD_TTL_SECONDS, UPLOAD_SWEEP_SECONDS)
+    )
+    print(
+        f"Upload retention sweep started "
+        f"(ttl={UPLOAD_TTL_SECONDS}s, interval={UPLOAD_SWEEP_SECONDS}s)."
+    )
+
     yield
 
-    # Clean up at shutdown (nothing to do for now).
+    # Stop the background sweep cleanly on shutdown.
+    sweep_task.cancel()
+    try:
+        await sweep_task
+    except asyncio.CancelledError:
+        pass
     print("API is shutting down.")
 
 

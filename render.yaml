@@ -26,6 +26,12 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true
+    envVars:
+      # Secret API key required on /api/detect. Render generates a random
+      # value on first deploy; the frontend pulls the same value below and
+      # injects it as the X-API-Key header (the browser never sees it).
+      - key: API_KEY
+        generateValue: true
 
   - type: web
     name: broccoli-frontend
@@ -44,3 +50,10 @@ services:
         value: broccoli-backend-00na.onrender.com
       - key: BACKEND_PORT
         value: "443"
+      # Same secret as the backend's API_KEY, kept in sync automatically.
+      # nginx injects it as X-API-Key on proxied /api/ requests.
+      - key: API_KEY
+        fromService:
+          type: web
+          name: broccoli-backend
+          envVarKey: API_KEY

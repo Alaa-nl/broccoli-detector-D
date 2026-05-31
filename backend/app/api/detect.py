@@ -8,9 +8,22 @@ This route ties together all the services:
   4. Annotator - draws boxes on the result image
 """
 
+import os
+import random
+import secrets
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from starlette.concurrency import run_in_threadpool
 
 from app.models.schemas import (
@@ -19,11 +32,75 @@ from app.models.schemas import (
     DetectionResponse,
 )
 from app.services.annotator import draw_detections
+from app.services.rate_limiter import RateLimiter
 from app.services.size_estimator import SizeEstimator
 from app.services.uploader import ImageUploader
 
 
-router = APIRouter()
+# --- Access control for the public upload endpoint (P0-4) ---------------
+#
+# The backend is internet-facing, so we (1) optionally require an API key
+# and (2) rate-limit per client. Auth is OPT-IN: it is enforced only when
+# the API_KEY env var is set. Local dev (no API_KEY) stays keyless; in
+# production Render sets API_KEY on the backend and the nginx frontend
+# injects the same value as the X-API-Key header (the browser never sees
+# it).
+
+# Rate-limit configuration (per client IP). Defaults to 10 requests/min.
+RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "10"))
+RATE_LIMIT_WINDOW_SECONDS = float(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+_rate_limiter = RateLimiter(RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SECONDS)
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """Reject the request unless it carries the configured API key.
+
+    No-op when API_KEY is unset (development), so the keyless local flow
+    keeps working. Uses a constant-time compare to avoid leaking the key
+    via timing.
+    """
+    expected = os.getenv("API_KEY")
+    if not expected:
+        return  # Auth disabled (no key configured).
+    if x_api_key is None or not secrets.compare_digest(x_api_key, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API key.",
+        )
+
+
+def _client_key(request: Request) -> str:
+    """Best-effort client identity for rate limiting.
+
+    Behind nginx the real client IP arrives in X-Forwarded-For /
+    X-Real-IP (set by the proxy); fall back to the socket peer otherwise.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(request: Request) -> None:
+    """Throttle CPU-heavy detection calls per client IP (429 when over)."""
+    key = _client_key(request)
+    if not _rate_limiter.allow(key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please slow down and try again shortly.",
+            headers={"Retry-After": str(_rate_limiter.retry_after(key))},
+        )
+    # Occasionally drop stale keys so the limiter's memory stays bounded.
+    if random.random() < 0.01:
+        _rate_limiter._prune()
+
+
+# Both guards run on every route in this router. /api/health lives in a
+# separate router, so monitoring stays open and unthrottled.
+router = APIRouter(dependencies=[Depends(require_api_key), Depends(rate_limit)])
 
 # Folder where uploads and annotated images are stored.
 # This must match the path used in main.py.

@@ -46,6 +46,10 @@ server {
         # Use the backend's hostname for SNI / virtual-host routing.
         proxy_set_header Host ${BACKEND_HOST};
         proxy_ssl_server_name on;
+        # Inject the backend API key server-side so the browser never sees
+        # it. When ${API_KEY} is empty (local dev), nginx drops the header
+        # and the keyless backend ignores it.
+        proxy_set_header X-API-Key "${API_KEY}";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

@@ -20,6 +20,10 @@ services:
       # the image every time we update the model file.
       - ./backend/weights:/app/weights
       - ./backend/uploads:/app/uploads
+    environment:
+      # API-key auth is OFF by default locally (empty key = no enforcement).
+      # To exercise the locked path, run: API_KEY=secret docker compose up
+      API_KEY: ${API_KEY:-}
     restart: unless-stopped
 
   frontend:
@@ -35,3 +39,5 @@ services:
       # compose service name. Default (1.1.1.1) is used in production
       # on Render with the backend's public hostname.
       DNS_RESOLVER: 127.0.0.11
+      # Must match the backend's API_KEY so nginx injects the right header.
+      API_KEY: ${API_KEY:-}
