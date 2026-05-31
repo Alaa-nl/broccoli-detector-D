@@ -25,6 +25,14 @@ COPY . .
 # Make sure the uploads folder exists.
 RUN mkdir -p uploads
 
+# Run as a non-root user so a parsing/deserialization bug (image parsing,
+# torch.load of the weights, or a library CVE) cannot gain root inside the
+# container. Create the user, then give it ownership of /app AFTER the code
+# and weights are copied and uploads/ exists, so it can read the model and
+# write annotated images.
+RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Tell Docker which port the app uses.
 EXPOSE 8000
 
