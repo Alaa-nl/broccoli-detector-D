@@ -6,6 +6,7 @@ The YOLOv8n model is loaded one time at startup, so the server
 does not need to load it again for every request.
 """
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -38,7 +39,25 @@ async def lifespan(app: FastAPI):
     # We store it on app.state so any route can use it.
     print(f"Loading YOLOv8n model from: {WEIGHTS_PATH}")
     app.state.detector = BroccoliDetector(weights_path=str(WEIGHTS_PATH))
-    print("Model loaded. API is ready.")
+
+    # Fail fast in production: if the model did not load (best.pt missing),
+    # refuse to boot so a misconfigured deploy crashes loudly instead of
+    # serving 503s forever. Frontend devs can set ALLOW_MISSING_WEIGHTS=1
+    # to run the UI without the weights file.
+    allow_missing = os.getenv("ALLOW_MISSING_WEIGHTS", "").lower() in ("1", "true", "yes")
+    if not app.state.detector.is_ready() and not allow_missing:
+        raise RuntimeError(
+            f"YOLO model failed to load from {WEIGHTS_PATH}. "
+            f"Set ALLOW_MISSING_WEIGHTS=1 to start without it (frontend dev only)."
+        )
+
+    if app.state.detector.is_ready():
+        print("Model loaded. API is ready.")
+    else:
+        print(
+            "WARNING: API started WITHOUT a model (ALLOW_MISSING_WEIGHTS set). "
+            "Detections will return 503 until best.pt is present."
+        )
 
     yield
 

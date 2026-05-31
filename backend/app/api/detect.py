@@ -71,11 +71,15 @@ async def detect_broccoli(
 
     # --- Step 2: run the YOLO model with the chosen confidence ---
     # The detector was loaded one time in main.py and stored on app.state.
+    # The detector object always exists (main.py sets it at startup), but
+    # its model is None when best.pt was missing. Guard on is_ready() so a
+    # misconfigured server returns a clear 503 (service not ready) instead
+    # of silently returning zero crowns at HTTP 200.
     detector = request.app.state.detector
-    if detector is None:
+    if detector is None or not detector.is_ready():
         raise HTTPException(
-            status_code=500,
-            detail="Detector is not loaded on the server.",
+            status_code=503,
+            detail="Detection model is not loaded on the server.",
         )
 
     # Run YOLO inference on a worker thread so it does not block the

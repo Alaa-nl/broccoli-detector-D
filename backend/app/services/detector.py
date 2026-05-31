@@ -46,7 +46,8 @@ class BroccoliDetector:
 
         # If the weights file is missing, we still want the app
         # to start so the team can develop the frontend without it.
-        # In that case, predict() will return an empty list.
+        # In that case self.model stays None: is_ready() reports False,
+        # the /detect route returns 503, and predict() raises if called.
         if not self.weights_path.exists():
             print(
                 f"WARNING: weights file not found at {self.weights_path}. "
@@ -57,6 +58,16 @@ class BroccoliDetector:
         else:
             # Load the model into memory one time.
             self.model = YOLO(str(self.weights_path))
+
+    def is_ready(self) -> bool:
+        """Whether the detector can actually run inference.
+
+        True only when the YOLO weights loaded successfully. When the
+        weights file was missing at startup, self.model is None and this
+        returns False. Both /api/health and /api/detect call this so the
+        two readiness checks can never drift apart.
+        """
+        return self.model is not None
 
     def predict(
         self,
@@ -75,12 +86,24 @@ class BroccoliDetector:
             A tuple of (detections, inference_time_ms) where
             detections is a list of dicts with keys:
             'x1', 'y1', 'x2', 'y2', 'confidence'.
+
+        Raises:
+            RuntimeError: If the model is not loaded (weights were missing
+                at startup). Callers should check is_ready() first; the
+                /detect route does this and returns 503 instead.
         """
-        # If the model could not load, return an empty result.
-        # (No lock needed: self.model is set once at startup and only
-        # read here; we touch no shared predictor state on this path.)
+        # If the model could not load, refuse loudly instead of silently
+        # returning zero detections (which looks identical to a real photo
+        # with no broccoli). This check is ABOVE the lock on purpose: it
+        # touches no shared predictor state, so it needs no lock and never
+        # acquires one. The /detect route guards with is_ready() and
+        # returns 503 before getting here; this raise is a backstop for
+        # any other caller that forgets to check.
         if self.model is None:
-            return [], 0.0
+            raise RuntimeError(
+                "Model is not loaded; cannot run prediction. "
+                "Check that weights/best.pt exists."
+            )
 
         # Pick which threshold to use this call.
         conf = (
