@@ -32,6 +32,12 @@ services:
       # injects it as the X-API-Key header (the browser never sees it).
       - key: API_KEY
         generateValue: true
+      # Known-good SHA-256 of backend/weights/best.pt. The detector hashes
+      # the file and refuses to load (torch.load/unpickle) if it does not
+      # match, rejecting a tampered/swapped checkpoint at startup.
+      # Update this value whenever the model is retrained.
+      - key: EXPECTED_WEIGHTS_SHA256
+        value: bf5f8500bba6a3b52bb55aec0212eef64581bff199e0e64a9f42322bf04acf6f
 
   - type: web
     name: broccoli-frontend

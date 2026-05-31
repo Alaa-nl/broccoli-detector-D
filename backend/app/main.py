@@ -29,7 +29,7 @@ WEIGHTS_PATH = Path(__file__).parent.parent / "weights" / "best.pt"
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Retention policy for saved uploads/annotated images (P0-4). Without a
+# Retention policy for saved uploads/annotated images. Without a
 # sweep the uploads dir grows forever and every field photo stays publicly
 # downloadable indefinitely. We delete files older than UPLOAD_TTL_SECONDS,
 # checking every UPLOAD_SWEEP_SECONDS. The TTL is far longer than a request

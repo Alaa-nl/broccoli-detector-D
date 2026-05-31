@@ -17,8 +17,10 @@ services:
       - "8000:8000"
     volumes:
       # Mount the weights folder so we do not have to rebuild
-      # the image every time we update the model file.
-      - ./backend/weights:/app/weights
+      # the image every time we update the model file. Read-only (:ro)
+      # so the model file cannot be swapped from inside the container at
+      # runtime (defence-in-depth for the weights integrity check).
+      - ./backend/weights:/app/weights:ro
       - ./backend/uploads:/app/uploads
     environment:
       # API-key auth is OFF by default locally (empty key = no enforcement).

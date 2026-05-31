@@ -6,10 +6,13 @@ model-related code in one place so the rest of the app
 does not need to know about Ultralytics.
 """
 
+import hashlib
+import os
+import secrets
 import threading
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from PIL import Image
@@ -22,7 +25,16 @@ from ultralytics import YOLO
 class BroccoliDetector:
     """Wrapper around the YOLOv8n model trained in Deliverable B."""
 
-    def __init__(self, weights_path: str, conf_threshold: float = 0.25):
+    # Read the weights file in 1 MB chunks when hashing so we never buffer
+    # the whole (multi-MB) file in memory just to verify it.
+    _HASH_CHUNK_BYTES = 1024 * 1024
+
+    def __init__(
+        self,
+        weights_path: str,
+        conf_threshold: float = 0.25,
+        expected_sha256: Optional[str] = None,
+    ):
         """Load the model from a .pt file.
 
         Args:
@@ -30,9 +42,18 @@ class BroccoliDetector:
             conf_threshold: Minimum confidence to keep a detection.
                 The default 0.25 is the standard value used by
                 Ultralytics during evaluation.
+            expected_sha256: Known-good SHA-256 of the weights file. When
+                provided (or set via the EXPECTED_WEIGHTS_SHA256 env var),
+                the file is hashed and compared BEFORE it is handed to
+                Ultralytics/torch.load. A .pt file is a pickle archive, so
+                torch.load executes any code embedded in it; verifying the
+                hash first means a tampered file is rejected and never
+                unpickled. When None/unset, verification is skipped (a
+                warning is printed) and the file loads as before.
         """
         self.weights_path = Path(weights_path)
         self.conf_threshold = conf_threshold
+        self.expected_sha256 = expected_sha256 or os.getenv("EXPECTED_WEIGHTS_SHA256")
 
         # The Ultralytics YOLO model is NOT thread-safe: its internal
         # predictor reuses buffers/state between calls, and the Results
@@ -56,8 +77,62 @@ class BroccoliDetector:
             )
             self.model = None
         else:
+            # Verify the file's integrity BEFORE handing it to Ultralytics.
+            # YOLO(...) calls torch.load, which unpickles the .pt archive and
+            # executes any code embedded in it. Hashing the raw bytes first
+            # means a swapped/tampered file is rejected without ever being
+            # unpickled.
+            self._verify_integrity()
+
             # Load the model into memory one time.
             self.model = YOLO(str(self.weights_path))
+
+    def _verify_integrity(self) -> None:
+        """Check the weights file hash against the expected value.
+
+        - No expected hash configured: skip the check (print a warning) and
+          let the file load as before. This keeps local dev and existing
+          deployments working without extra configuration.
+        - Expected hash configured and matches: return quietly; the caller
+          proceeds to load the model.
+        - Expected hash configured and does NOT match: raise RuntimeError so
+          the tampered file is never unpickled. This is a security/tamper
+          event and is intentionally NOT bypassable by ALLOW_MISSING_WEIGHTS
+          (that flag only covers a genuinely missing file for frontend dev).
+
+        Raises:
+            RuntimeError: If an expected hash is set and the file's hash
+                does not match it.
+        """
+        if not self.expected_sha256:
+            print(
+                "WARNING: weights integrity verification is DISABLED "
+                "(EXPECTED_WEIGHTS_SHA256 not set). Set it to the known-good "
+                "SHA-256 of best.pt to reject tampered weights before load."
+            )
+            return
+
+        actual = self._compute_sha256(self.weights_path)
+
+        # Constant-time, case-insensitive comparison (hex digests may differ
+        # in case). compare_digest needs equal-length inputs, so normalise.
+        if not secrets.compare_digest(actual, self.expected_sha256.strip().lower()):
+            # Do NOT include the computed/expected digests or the absolute
+            # path in the message (avoid leaking internal state).
+            raise RuntimeError(
+                "Weights integrity check failed: best.pt does not match the "
+                "expected SHA-256. Refusing to load a potentially tampered "
+                "model file."
+            )
+
+    @classmethod
+    def _compute_sha256(cls, path: Path) -> str:
+        """Return the lowercase hex SHA-256 of a file, read in chunks."""
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(cls._HASH_CHUNK_BYTES):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def is_ready(self) -> bool:
         """Whether the detector can actually run inference.

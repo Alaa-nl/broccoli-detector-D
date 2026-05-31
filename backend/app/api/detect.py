@@ -37,7 +37,7 @@ from app.services.size_estimator import SizeEstimator
 from app.services.uploader import ImageUploader
 
 
-# --- Access control for the public upload endpoint (P0-4) ---------------
+# --- Access control for the public upload endpoint ----------------------
 #
 # The backend is internet-facing, so we (1) optionally require an API key
 # and (2) rate-limit per client. Auth is OPT-IN: it is enforced only when
