@@ -23,9 +23,16 @@ Image.MAX_IMAGE_PIXELS = 25_000_000  # ~25 megapixels
 class ImageUploader:
     """Save user-uploaded images to disk after basic validation."""
 
-    # Only these file types are allowed (matches the Upload screen).
+    # Only these file types are allowed (matches the Upload screen). This is
+    # a cheap early pre-filter on the *claimed* filename extension; the
+    # authoritative check is the decoded image format (see FORMAT_TO_EXT).
     ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-    ALLOWED_MIME_TYPES = {"image/jpeg", "image/png"}
+
+    # Canonical extension for each image format Pillow reports after decoding
+    # the header. The saved filename is built from this (not from the user's
+    # filename), so the on-disk name always reflects the true content and is
+    # fully server-controlled. Anything not in this map is rejected.
+    FORMAT_TO_EXT = {"JPEG": ".jpg", "PNG": ".png"}
 
     # Max file size in bytes. 10 MB is enough for any field photo
     # and matches the limit shown on the Upload screen.
@@ -71,13 +78,15 @@ class ImageUploader:
                 detail="No file name was sent with the upload.",
             )
 
-        # Check the extension.
-        ext = Path(upload.filename).suffix.lower()
-        if ext not in self.ALLOWED_EXTENSIONS:
+        # Cheap pre-filter on the claimed filename extension so obvious
+        # non-images are rejected before we read the body. The saved name
+        # does NOT use this value; the real format is decided after decode.
+        claimed_ext = Path(upload.filename).suffix.lower()
+        if claimed_ext not in self.ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"File type '{ext}' is not allowed. "
+                    f"File type '{claimed_ext}' is not allowed. "
                     f"Please upload a JPG or PNG image."
                 ),
             )
@@ -126,6 +135,19 @@ class ImageUploader:
                 detail="Image dimensions are too large.",
             )
 
+        # Determine the extension from what the file ACTUALLY decoded as,
+        # not from the (user-controlled) filename. .format is set by
+        # Image.open and is reset to None by .convert() below, so read it
+        # here. A mismatch (e.g. PNG bytes named "photo.jpg") is resolved in
+        # favour of the real content; an unsupported format is rejected.
+        img_format = pil_image.format
+        ext = self.FORMAT_TO_EXT.get(img_format)
+        if ext is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported image format. Please upload a JPG or PNG image.",
+            )
+
         # Convert to RGB to make sure we can run YOLO on it (PNGs may
         # have an alpha channel that YOLO does not like). This is the
         # full decode, so it is also where Pillow's own bomb guard and
@@ -143,12 +165,15 @@ class ImageUploader:
                 detail="The image file is truncated or corrupt.",
             )
 
-        # Build a unique image ID using uuid4 (random and short).
+        # Build a unique image ID using uuid4 (random and short). The
+        # filename is image_id + the format-derived extension, so every
+        # component is server-controlled.
         image_id = uuid.uuid4().hex[:12]
         saved_filename = f"{image_id}{ext}"
         saved_path = self.upload_dir / saved_filename
 
-        # Save the original image to disk.
+        # Save the original image to disk. The extension matches the true
+        # format, so Pillow encodes it consistently.
         pil_image.save(saved_path)
 
         return saved_path, image_id, pil_image
