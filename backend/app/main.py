@@ -44,6 +44,12 @@ UPLOAD_SWEEP_SECONDS = int(os.getenv("UPLOAD_SWEEP_SECONDS", "600"))   # 10 min
 # boundaries and the form fields.
 MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
 
+# When DEPLOY_ENV=production, hide the interactive API docs and OpenAPI
+# schema so the public backend does not advertise its endpoints. Local dev
+# and docker compose leave it unset (dev), keeping /docs available.
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "dev")
+_is_prod = DEPLOY_ENV.strip().lower() == "production"
+
 # CORS origins allowed to call the API from a browser. Comma-separated,
 # overridable via env. Defaults cover local dev (Vite :5173, compose :8080).
 # The deployed app calls the backend same-origin through the proxy, so CORS
@@ -222,6 +228,9 @@ app = FastAPI(
                 "and estimates the size of each crown.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
 
 # Allow the React frontend to call this API from a browser. Origins come
@@ -253,7 +262,8 @@ app.include_router(detect.router, prefix="/api", tags=["detect"])
 @app.get("/")
 def root():
     """Simple welcome message at the root URL."""
-    return {
-        "message": "Broccoli Crown Detection API is running.",
-        "docs": "/docs",
-    }
+    info = {"message": "Broccoli Crown Detection API is running."}
+    # Only advertise the docs when they are actually enabled (dev).
+    if not _is_prod:
+        info["docs"] = "/docs"
+    return info

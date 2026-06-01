@@ -38,6 +38,11 @@ services:
       # Update this value whenever the model is retrained.
       - key: EXPECTED_WEIGHTS_SHA256
         value: bf5f8500bba6a3b52bb55aec0212eef64581bff199e0e64a9f42322bf04acf6f
+      # Hide the interactive API docs (/docs, /redoc, /openapi.json) on the
+      # public backend so it does not advertise its endpoints. Local dev and
+      # docker compose leave this unset and keep the docs available.
+      - key: DEPLOY_ENV
+        value: production
 
   - type: web
     name: broccoli-frontend
