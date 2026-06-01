@@ -22,6 +22,11 @@ services:
       # runtime (defence-in-depth for the weights integrity check).
       - ./backend/weights:/app/weights:ro
       - ./backend/uploads:/app/uploads
+    # Load all backend configuration (rate limits, CORS, upload TTLs, log
+    # level, optional weights hash) from the root .env into the container.
+    # Without this, only the interpolated vars below would reach the backend.
+    env_file:
+      - .env
     environment:
       # API-key auth is OFF by default locally (empty key = no enforcement).
       # To exercise the locked path, run: API_KEY=secret docker compose up
