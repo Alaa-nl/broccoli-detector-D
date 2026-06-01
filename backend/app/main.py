@@ -7,30 +7,72 @@ does not need to load it again for every request.
 """
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
+import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import detect, health
 from app.services.detector import BroccoliDetector
 
 
+# Per-request correlation id. Each incoming request gets a short id (echoed
+# from a well-formed inbound X-Request-ID header, or freshly generated) that
+# we stash in a ContextVar so the route, the logging filter, and the request-id
+# middleware all read the same value without passing it around. The "-" default
+# is what shows for logs emitted outside any request (startup, the retention
+# sweep, shutdown).
+request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-"
+)
+
+# Only echo an inbound X-Request-ID if it is well-formed. This blocks log
+# forging / header injection (newlines, control chars) and bounds the length;
+# anything else is replaced with a freshly generated id.
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+class _RequestIDLogFilter(logging.Filter):
+    """Stamp the current request id onto every log record.
+
+    The log format includes [%(request_id)s], so every record must carry a
+    request_id attribute or formatting would raise. This filter sets it from
+    the ContextVar (default "-" outside a request), so even library/uvicorn
+    records that reach the root handler format cleanly.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx.get()
+        return True
+
+
 # Configure logging once for the whole app. Level is overridable via
 # LOG_LEVEL (default INFO). Using the logging module (instead of print)
 # gives levels/timestamps/logger names and lets logs be filtered or routed
-# without code changes. Output still goes to stdout, so Docker/Render log
-# capture is unchanged.
+# without code changes. The [%(request_id)s] field ties each line to one
+# request (see RequestIDMiddleware). Output still goes to stdout, so
+# Docker/Render log capture is unchanged.
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    format="%(asctime)s %(levelname)s %(name)s [%(request_id)s]: %(message)s",
 )
+# Attach the filter to the root handler(s) basicConfig just created, so every
+# record formatted there carries a request_id (no KeyError on library logs).
+_rid_filter = _RequestIDLogFilter()
+for _handler in logging.getLogger().handlers:
+    if not any(isinstance(f, _RequestIDLogFilter) for f in _handler.filters):
+        _handler.addFilter(_rid_filter)
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,6 +223,94 @@ class BodySizeLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+class RequestIDMiddleware:
+    """Pure-ASGI middleware that gives every request a correlation id.
+
+    For each HTTP request it:
+      1. Picks an id - echoing a well-formed inbound X-Request-ID, else a
+         fresh uuid4 hex.
+      2. Publishes it in request_id_ctx so the route, the logging filter and
+         this middleware all see the same value; resets it in a finally so it
+         cannot leak into the next request.
+      3. Stamps it back as the X-Request-ID response header on every response.
+      4. Catches any UNHANDLED exception from the inner app and returns a safe
+         JSON 500 ({"detail", "request_id"}) carrying the header, logged once
+         with a traceback. We handle it HERE rather than via
+         @app.exception_handler because Starlette runs the catch-all Exception
+         handler in its outer ServerErrorMiddleware - outside this middleware -
+         where the header would be missing and the id already reset.
+
+    Registered OUTERMOST (added last), so it wraps the body-size and CORS
+    middleware and every response (including a 413) carries the header.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Pick the id: trust an inbound header only when it is well-formed.
+        headers = dict(scope.get("headers", []))
+        inbound = headers.get(b"x-request-id")
+        request_id = None
+        if inbound is not None:
+            candidate = inbound.decode("latin-1", "replace")
+            if _REQUEST_ID_RE.fullmatch(candidate):
+                request_id = candidate
+        if request_id is None:
+            request_id = uuid.uuid4().hex
+        request_id_bytes = request_id.encode("ascii")
+
+        token = request_id_ctx.set(request_id)
+        response_started = False
+
+        async def send_with_request_id(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+                # Replace any existing X-Request-ID, then add exactly one.
+                # (headers is a list of lowercase (bytes, bytes) tuples.)
+                headers_out = [
+                    (k, v)
+                    for (k, v) in message.get("headers", [])
+                    if k.lower() != b"x-request-id"
+                ]
+                headers_out.append((b"x-request-id", request_id_bytes))
+                message = {**message, "headers": headers_out}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_request_id)
+        except Exception:
+            # An unhandled error escaped the app. Log it once, with the id and
+            # a traceback. HTTPException / validation errors never reach here -
+            # Starlette's ExceptionMiddleware turns those into normal responses
+            # further in, so only genuinely unexpected failures land here.
+            logger.exception("Unhandled error while handling request [%s]", request_id)
+            if response_started:
+                # Headers already sent; we cannot emit a clean 500. Re-raise so
+                # the server tears the connection down.
+                raise
+            body = json.dumps(
+                {"detail": "Internal server error", "request_id": request_id}
+            ).encode()
+            await send({
+                "type": "http.response.start",
+                "status": 500,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"x-request-id", request_id_bytes),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+        finally:
+            request_id_ctx.reset(token)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -261,9 +391,15 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# Reject oversized request bodies before they are buffered. Added last so
-# it wraps the others and runs first on each incoming request.
+# Reject oversized request bodies before they are buffered.
 app.add_middleware(BodySizeLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES)
+
+# Assign a correlation id to every request. Added LAST so it is the OUTERMOST
+# middleware: it runs first on the way in (the id is set before anything else
+# can fail) and last on the way out (its send-wrapper stamps X-Request-ID onto
+# every response, including the 413 from BodySizeLimitMiddleware and CORS
+# responses). This registration must stay last - the ordering is load-bearing.
+app.add_middleware(RequestIDMiddleware)
 
 # Serve uploaded and result images as static files so the frontend can show them.
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

@@ -74,9 +74,12 @@ export default function Upload({
       });
 
       if (!response.ok) {
-        // Try to read the error message that FastAPI sends back.
+        // Try to read the error message that FastAPI sends back, plus the
+        // request id from the response header so the user can quote it to us.
         const errorBody = await response.json().catch(() => ({}));
-        throw new Error(errorBody.detail || `Server returned ${response.status}`);
+        const ref = response.headers.get('X-Request-ID');
+        const message = errorBody.detail || `Server returned ${response.status}`;
+        throw new Error(ref ? `${message} (ref: ${ref})` : message);
       }
 
       const data = await response.json();
