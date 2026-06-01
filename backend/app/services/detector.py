@@ -7,6 +7,7 @@ does not need to know about Ultralytics.
 """
 
 import hashlib
+import logging
 import os
 import secrets
 import threading
@@ -20,6 +21,8 @@ from PIL import Image
 # We import YOLO from ultralytics. This is the same library
 # we used in Deliverable B for training.
 from ultralytics import YOLO
+
+logger = logging.getLogger(__name__)
 
 
 class BroccoliDetector:
@@ -70,10 +73,10 @@ class BroccoliDetector:
         # In that case self.model stays None: is_ready() reports False,
         # the /detect route returns 503, and predict() raises if called.
         if not self.weights_path.exists():
-            print(
-                f"WARNING: weights file not found at {self.weights_path}. "
-                f"The detector will return empty results until you copy "
-                f"best.pt into the backend/weights/ folder."
+            logger.warning(
+                "Weights file not found (%s). The detector will return empty "
+                "results until best.pt is placed in the weights folder.",
+                self.weights_path.name,
             )
             self.model = None
         else:
@@ -105,8 +108,8 @@ class BroccoliDetector:
                 does not match it.
         """
         if not self.expected_sha256:
-            print(
-                "WARNING: weights integrity verification is DISABLED "
+            logger.warning(
+                "Weights integrity verification is DISABLED "
                 "(EXPECTED_WEIGHTS_SHA256 not set). Set it to the known-good "
                 "SHA-256 of best.pt to reject tampered weights before load."
             )

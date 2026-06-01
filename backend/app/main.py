@@ -8,6 +8,7 @@ does not need to load it again for every request.
 
 import asyncio
 import json
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
@@ -19,6 +20,18 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import detect, health
 from app.services.detector import BroccoliDetector
+
+
+# Configure logging once for the whole app. Level is overridable via
+# LOG_LEVEL (default INFO). Using the logging module (instead of print)
+# gives levels/timestamps/logger names and lets logs be filtered or routed
+# without code changes. Output still goes to stdout, so Docker/Render log
+# capture is unchanged.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 # Path to the trained YOLOv8n weights file.
@@ -86,7 +99,7 @@ async def _retention_sweep(upload_dir: Path, ttl: int, interval: int):
                     # File vanished or is momentarily unreadable; skip it.
                     continue
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
-            print(f"WARNING: retention sweep failed: {exc}")
+            logger.warning("Retention sweep failed: %s", exc)
         await asyncio.sleep(interval)
 
 
@@ -178,7 +191,7 @@ async def lifespan(app: FastAPI):
     """
     # Load the YOLOv8n model into memory one time.
     # We store it on app.state so any route can use it.
-    print(f"Loading YOLOv8n model from: {WEIGHTS_PATH}")
+    logger.info("Loading YOLOv8n model from: %s", WEIGHTS_PATH.name)
     app.state.detector = BroccoliDetector(weights_path=str(WEIGHTS_PATH))
 
     # Fail fast in production: if the model did not load (best.pt missing),
@@ -188,15 +201,15 @@ async def lifespan(app: FastAPI):
     allow_missing = os.getenv("ALLOW_MISSING_WEIGHTS", "").lower() in ("1", "true", "yes")
     if not app.state.detector.is_ready() and not allow_missing:
         raise RuntimeError(
-            f"YOLO model failed to load from {WEIGHTS_PATH}. "
+            f"YOLO model failed to load from {WEIGHTS_PATH.name}. "
             f"Set ALLOW_MISSING_WEIGHTS=1 to start without it (frontend dev only)."
         )
 
     if app.state.detector.is_ready():
-        print("Model loaded. API is ready.")
+        logger.info("Model loaded. API is ready.")
     else:
-        print(
-            "WARNING: API started WITHOUT a model (ALLOW_MISSING_WEIGHTS set). "
+        logger.warning(
+            "API started WITHOUT a model (ALLOW_MISSING_WEIGHTS set). "
             "Detections will return 503 until best.pt is present."
         )
 
@@ -205,9 +218,10 @@ async def lifespan(app: FastAPI):
     sweep_task = asyncio.create_task(
         _retention_sweep(UPLOAD_DIR, UPLOAD_TTL_SECONDS, UPLOAD_SWEEP_SECONDS)
     )
-    print(
-        f"Upload retention sweep started "
-        f"(ttl={UPLOAD_TTL_SECONDS}s, interval={UPLOAD_SWEEP_SECONDS}s)."
+    logger.info(
+        "Upload retention sweep started (ttl=%ss, interval=%ss).",
+        UPLOAD_TTL_SECONDS,
+        UPLOAD_SWEEP_SECONDS,
     )
 
     yield
@@ -218,7 +232,7 @@ async def lifespan(app: FastAPI):
         await sweep_task
     except asyncio.CancelledError:
         pass
-    print("API is shutting down.")
+    logger.info("API is shutting down.")
 
 
 # Create the FastAPI app and pass the lifespan handler.

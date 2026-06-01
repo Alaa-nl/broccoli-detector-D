@@ -156,7 +156,8 @@ async def detect_broccoli(
     if detector is None or not detector.is_ready():
         raise HTTPException(
             status_code=503,
-            detail="Detection model is not loaded on the server.",
+            detail="The detection service is temporarily unavailable. "
+                   "Please try again later.",
         )
 
     # Run YOLO inference on a worker thread so it does not block the
