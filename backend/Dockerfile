@@ -43,9 +43,22 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
 
-# Start the server. We use 0.0.0.0 so it is reachable from outside the
-# container. --limit-concurrency caps how many requests can be in flight
-# at once so a burst of uploads can't pile up unbounded on the single
-# worker (CPU-bound inference is offloaded to a threadpool); excess
-# requests get a fast 503 instead of exhausting memory.
+# Start the server as a single uvicorn process. We use 0.0.0.0 so it is
+# reachable from outside the container. --limit-concurrency caps how many
+# requests can be in flight at once so a burst of uploads can't pile up
+# unbounded; excess requests get a fast 503 instead of exhausting memory.
+#
+# Running one process is deliberate, not a limitation: CPU-bound inference is
+# offloaded to a worker thread, so the event loop stays responsive and the
+# single process handles concurrent uploads fine on a small instance.
+#
+# We do NOT add more workers here. On the small hosting tier this app targets
+# (~0.1-0.5 CPU, 512 MB RAM) extra workers would hurt rather than help:
+#   - each worker loads its own copy of the model + torch into RAM, so two or
+#     more workers can exceed the memory limit and get OOM-killed;
+#   - the rate limiter and the upload-retention sweep keep their state inside
+#     the process, so N workers make the rate limit N times looser and run N
+#     redundant sweeps over the same uploads folder.
+# To scale on a larger multi-CPU instance, first move rate-limit state to a
+# shared store (e.g. Redis), then add a process manager / extra workers.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--limit-concurrency", "32"]
