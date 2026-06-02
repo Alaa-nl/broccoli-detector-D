@@ -32,6 +32,17 @@ services:
       # To exercise the locked path, run: API_KEY=secret docker compose up
       API_KEY: ${API_KEY:-}
     restart: unless-stopped
+    # Local safety ceiling, honored by `docker compose up`. It is a backstop
+    # against a runaway/leaking container eating all host memory - NOT a
+    # production mirror. It is set well ABOVE both what the app needs (CPU
+    # YOLO + torch inference sits around ~1 GB) and the production free-tier
+    # budget (512 MB); the demo runs locally precisely because inference needs
+    # far more than the free tier, so a tight limit here would OOM-kill it.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3g
 
   frontend:
     build: ./frontend
@@ -53,3 +64,10 @@ services:
       DNS_RESOLVER: 127.0.0.11
       # Must match the backend's API_KEY so nginx injects the right header.
       API_KEY: ${API_KEY:-}
+    # Local safety ceiling (see backend). nginx only serves static files, so
+    # this is generous; just a backstop, not a production mirror.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
