@@ -102,6 +102,33 @@ def rate_limit(request: Request) -> None:
         _rate_limiter._prune()
 
 
+def get_uploader() -> ImageUploader:
+    """Provide the image uploader.
+
+    Injected (rather than built inline in the route) so the handler is
+    decoupled from the concrete class and tests can swap it via
+    app.dependency_overrides.
+    """
+    return ImageUploader(upload_dir=config.UPLOAD_DIR)
+
+
+def get_size_estimator(
+    camera_height_mm: float = Form(
+        default=config.DEFAULT_CAMERA_HEIGHT_MM,
+        gt=config.CAMERA_HEIGHT_MIN_MM,
+        lt=config.CAMERA_HEIGHT_MAX_MM,
+        description="Camera height above the ground in mm (default 1000 mm = "
+                    "1 metre). Must be between 100 and 5000 mm.",
+    ),
+) -> SizeEstimator:
+    """Provide a SizeEstimator configured with the request's camera height.
+
+    The camera_height_mm form field (and its bounds) is declared here, so it
+    is still validated as part of the request body exactly as before.
+    """
+    return SizeEstimator(camera_height_mm=camera_height_mm)
+
+
 # Both guards run on every route in this router. /api/health lives in a
 # separate router, so monitoring stays open and unthrottled.
 router = APIRouter(dependencies=[Depends(require_api_key), Depends(rate_limit)])
@@ -111,13 +138,6 @@ router = APIRouter(dependencies=[Depends(require_api_key), Depends(rate_limit)])
 async def detect_broccoli(
     request: Request,
     file: UploadFile = File(..., description="A JPG or PNG broccoli image."),
-    camera_height_mm: float = Form(
-        default=config.DEFAULT_CAMERA_HEIGHT_MM,
-        gt=config.CAMERA_HEIGHT_MIN_MM,
-        lt=config.CAMERA_HEIGHT_MAX_MM,
-        description="Camera height above the ground in mm (default 1000 mm = "
-                    "1 metre). Must be between 100 and 5000 mm.",
-    ),
     conf_threshold: float = Form(
         default=config.API_DEFAULT_CONF,
         ge=config.CONF_MIN,
@@ -130,6 +150,8 @@ async def detect_broccoli(
         description="If True, drop boxes that are too elongated "
                     "(probably leaves, not crowns).",
     ),
+    uploader: ImageUploader = Depends(get_uploader),
+    size_estimator: SizeEstimator = Depends(get_size_estimator),
 ):
     """Run broccoli crown detection on an uploaded image.
 
@@ -141,8 +163,7 @@ async def detect_broccoli(
       5. Draw the boxes on a new annotated image.
       6. Return a JSON response with all the results.
     """
-    # --- Step 1: save the upload ---
-    uploader = ImageUploader(upload_dir=config.UPLOAD_DIR)
+    # --- Step 1: save the upload (uploader injected via Depends) ---
     saved_path, image_id, pil_image = await uploader.save(file)
 
     img_width = pil_image.width
@@ -184,7 +205,7 @@ async def detect_broccoli(
     num_filtered = detections_before_filter - len(raw_detections)
 
     # --- Step 4: convert each box into a CrownDetection ---
-    size_estimator = SizeEstimator(camera_height_mm=camera_height_mm)
+    # size_estimator is injected via Depends, configured with camera_height_mm.
     crown_models = []
 
     for i, det in enumerate(raw_detections, start=1):
@@ -236,7 +257,7 @@ async def detect_broccoli(
         "detection complete: image_id=%s dims=%dx%d crowns=%d filtered=%d "
         "conf=%.2f camera_height_mm=%.0f inference_ms=%.1f",
         image_id, img_width, img_height, len(crown_models), num_filtered,
-        conf_threshold, camera_height_mm, inference_time_ms,
+        conf_threshold, size_estimator.camera_height_mm, inference_time_ms,
     )
 
     return DetectionResponse(
@@ -248,7 +269,7 @@ async def detect_broccoli(
         crowns=crown_models,
         num_crowns=len(crown_models),
         inference_time_ms=inference_time_ms,
-        camera_height_mm=camera_height_mm,
+        camera_height_mm=size_estimator.camera_height_mm,
         conf_threshold=conf_threshold,
         aspect_ratio_filter=aspect_ratio_filter,
         num_filtered=num_filtered,
