@@ -16,11 +16,11 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount the weights folder so we do not have to rebuild
-      # the image every time we update the model file. Read-only (:ro)
-      # so the model file cannot be swapped from inside the container at
-      # runtime (defence-in-depth for the weights integrity check).
-      - ./backend/weights:/app/weights:ro
+      # Persist uploaded/annotated images on the host so they survive a
+      # container restart. The model (best.pt) is intentionally NOT mounted:
+      # the container uses the copy baked into the image, so local docker
+      # compose behaves the same as the deployed image. To use a new model,
+      # rebuild:  docker compose up --build.
       - ./backend/uploads:/app/uploads
     # Load all backend configuration (rate limits, CORS, upload TTLs, log
     # level, optional weights hash) from the root .env into the container.
