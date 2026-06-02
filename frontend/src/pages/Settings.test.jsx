@@ -2,6 +2,7 @@
 
 import { render, screen } from '@testing-library/react';
 import Settings from './Settings.jsx';
+import { MODEL_INFO } from '../constants/model.js';
 
 const noop = () => {};
 const baseProps = {
@@ -52,5 +53,16 @@ describe('Settings health check', () => {
     expect(
       await screen.findByText(/ok \(model loaded\)/i),
     ).toBeInTheDocument();
+  });
+
+  it('renders the model-info rows from MODEL_INFO', () => {
+    // Never-resolving health fetch; we only care about the static model rows.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+
+    render(<Settings {...baseProps} />);
+
+    expect(screen.getByText(MODEL_INFO.parameters)).toBeInTheDocument();
+    expect(screen.getByText(MODEL_INFO.architecture)).toBeInTheDocument();
+    expect(screen.getByText(MODEL_INFO.weights)).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
 import { getHealth } from '../api/client';
+import { MODEL_INFO } from '../constants/model.js';
 
 // Give up on the health check after this long so it can't sit on
 // "checking..." forever if the backend never answers.
@@ -232,11 +233,11 @@ export default function Settings({
       <section className="card p-5 bg-gray-900 dark:bg-gray-800 text-white">
         <h2 className="font-semibold mb-3">Model Information</h2>
         <dl className="text-sm space-y-1">
-          <Row label="Architecture" value="YOLOv8n (Ultralytics)" />
-          <Row label="Parameters" value="3.0M" />
-          <Row label="Training mAP@0.5" value="0.976" />
-          <Row label="Mean IoU" value="0.916" />
-          <Row label="Weights" value="best.pt (about 6 MB)" />
+          <Row label="Architecture" value={MODEL_INFO.architecture} />
+          <Row label="Parameters" value={MODEL_INFO.parameters} />
+          <Row label="Training mAP@0.5" value={MODEL_INFO.trainingMap} />
+          <Row label="Mean IoU" value={MODEL_INFO.meanIoU} />
+          <Row label="Weights" value={MODEL_INFO.weights} />
           <Row
             label="Server status"
             value={

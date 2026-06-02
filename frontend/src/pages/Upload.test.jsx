@@ -4,6 +4,12 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Upload from './Upload.jsx';
+import {
+  ACCEPT,
+  ALLOWED_TYPES,
+  MAX_FILE_SIZE_MB,
+  TYPE_LABELS,
+} from '../constants/upload.js';
 
 // A fetch that never resolves on its own and rejects with an AbortError
 // the moment its signal is aborted - lets us drive timeout/cancel paths.
@@ -100,6 +106,21 @@ describe('Upload drop-zone accessibility', () => {
     // sr-only keeps it in the tab order (unlike `hidden`, which is display:none).
     expect(input).toHaveClass('sr-only');
     expect(input).not.toHaveClass('hidden');
+  });
+});
+
+describe('Upload validation constants are single-sourced', () => {
+  it('derives the accept attribute and format chips from the constants', () => {
+    renderUpload();
+
+    const input = screen.getByLabelText(/drag & drop/i);
+    expect(input).toHaveAttribute('accept', ACCEPT);
+
+    // One chip per allowed type label, plus the size limit chip.
+    ALLOWED_TYPES.forEach((type) => {
+      expect(screen.getByText(TYPE_LABELS[type])).toBeInTheDocument();
+    });
+    expect(screen.getByText(`Max ${MAX_FILE_SIZE_MB} MB`)).toBeInTheDocument();
   });
 });
 

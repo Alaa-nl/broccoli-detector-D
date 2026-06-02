@@ -3,6 +3,7 @@
 
 import { Link } from 'react-router-dom';
 import { Upload, Settings, Info, Camera } from 'lucide-react';
+import { MODEL_INFO } from '../constants/model.js';
 
 // Each tile is a Link to one of the main screens.
 const tiles = [
@@ -81,9 +82,10 @@ export default function Home() {
           How the model performs
         </h3>
         <p className="text-sm text-gray-700 dark:text-gray-300">
-          The YOLOv8n model reached <strong>mAP@0.5 = 0.976</strong> and
-          <strong> mean IoU = 0.916</strong> on a test set of 27 unseen
-          field images during Deliverable B training.
+          The YOLOv8n model reached <strong>mAP@0.5 = {MODEL_INFO.trainingMap}</strong> and
+          <strong> mean IoU = {MODEL_INFO.meanIoU}</strong> on a test set of{' '}
+          {MODEL_INFO.testSetSize} unseen field images during Deliverable B
+          training.
         </p>
       </section>
     </div>

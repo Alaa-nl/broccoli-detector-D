@@ -6,11 +6,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud, FileImage, AlertCircle, Loader2 } from 'lucide-react';
 import { detectImage } from '../api/client';
-
-// Files larger than this are rejected on the client too,
-// so the user gets fast feedback (the backend also checks).
-const MAX_FILE_SIZE_MB = 10;
-const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
+import {
+  ALLOWED_TYPES,
+  MAX_FILE_SIZE_MB,
+  ACCEPT,
+  TYPE_LABELS,
+} from '../constants/upload.js';
 
 // Give up on a detection after this long so the UI can never get stuck
 // on "Detecting..." forever (CPU inference can be slow, but not endless).
@@ -170,9 +171,17 @@ export default function Upload({
               or click to browse files
             </div>
             <div className="flex gap-2 justify-center text-xs">
-              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">.JPG</span>
-              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">.PNG</span>
-              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">Max 10 MB</span>
+              {ALLOWED_TYPES.map((type) => (
+                <span
+                  key={type}
+                  className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full"
+                >
+                  {TYPE_LABELS[type]}
+                </span>
+              ))}
+              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">
+                Max {MAX_FILE_SIZE_MB} MB
+              </span>
             </div>
           </div>
         )}
@@ -181,7 +190,7 @@ export default function Upload({
             so keyboard users can focus it and open the picker. */}
         <input
           type="file"
-          accept="image/jpeg,image/png"
+          accept={ACCEPT}
           onChange={(e) => pickFile(e.target.files?.[0])}
           className="sr-only"
         />
