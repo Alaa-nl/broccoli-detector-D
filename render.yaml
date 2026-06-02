@@ -52,9 +52,12 @@ services:
     dockerfilePath: ./Dockerfile
     autoDeploy: true
     envVars:
-      # Hardcoded because Render's fromService.property has no value
-      # that returns the public *.onrender.com URL. If the backend
-      # service is renamed/recreated, update these three values.
+      # Backend's public URL, hardcoded: Render's fromService can't return a
+      # service's public *.onrender.com URL (only its private name, which is
+      # unusable here - see the resolver note at the top of this file). The
+      # host below carries a Render-generated suffix (-00na); if the backend
+      # service is renamed or recreated that suffix changes, so update these
+      # three values then - otherwise the frontend proxies to a dead host (502).
       - key: BACKEND_SCHEME
         value: https
       - key: BACKEND_HOST
