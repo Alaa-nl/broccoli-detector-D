@@ -8,6 +8,7 @@ This route ties together all the services:
   4. Annotator - draws boxes on the result image
 """
 
+import logging
 import os
 import random
 import secrets
@@ -35,6 +36,8 @@ from app.services.annotator import draw_detections
 from app.services.rate_limiter import RateLimiter
 from app.services.size_estimator import SizeEstimator
 from app.services.uploader import ImageUploader
+
+logger = logging.getLogger(__name__)
 
 
 # --- Access control for the public upload endpoint ----------------------
@@ -249,6 +252,17 @@ async def detect_broccoli(
     # The frontend will call these URLs to show the images.
     image_url = f"/uploads/{saved_path.name}"
     annotated_url = f"/uploads/{annotated_filename}"
+
+    # One structured line per completed detection, for server-side
+    # observability (latency, detection counts). The logging filter in
+    # main.py prefixes it with the request id, so it correlates with the
+    # X-Request-ID the client received.
+    logger.info(
+        "detection complete: image_id=%s dims=%dx%d crowns=%d filtered=%d "
+        "conf=%.2f camera_height_mm=%.0f inference_ms=%.1f",
+        image_id, img_width, img_height, len(crown_models), num_filtered,
+        conf_threshold, camera_height_mm, inference_time_ms,
+    )
 
     return DetectionResponse(
         image_id=image_id,
