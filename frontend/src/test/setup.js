@@ -20,4 +20,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   localStorage.clear();
+  // The dark-mode tests toggle this class on <html>; reset it so it can't
+  // leak into another test.
+  document.documentElement.classList.remove('dark');
 });

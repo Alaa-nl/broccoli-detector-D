@@ -97,3 +97,26 @@ describe('App detection persistence', () => {
     );
   });
 });
+
+describe('App dark-mode (no FOUC)', () => {
+  it('keeps the pre-set dark class on mount instead of stripping it', () => {
+    localStorage.setItem('darkMode', 'true');
+    // Simulate the index.html script having set the class before React mounts.
+    document.documentElement.classList.add('dark');
+    const removeSpy = vi.spyOn(document.documentElement.classList, 'remove');
+
+    renderAppAt('/');
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    // Lazy-init means the apply effect adds (keeps) the class and never
+    // strips it on first render - that strip is exactly the visible flash.
+    expect(removeSpy).not.toHaveBeenCalledWith('dark');
+
+    removeSpy.mockRestore();
+  });
+
+  it('does not enable dark mode when nothing is saved', () => {
+    renderAppAt('/');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+});

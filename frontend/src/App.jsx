@@ -31,20 +31,28 @@ export default function App() {
   });
 
   // User settings (saved in localStorage so they survive a reload).
-  const [darkMode, setDarkMode] = useState(false);
+  // darkMode is lazy-initialised from storage so React's first render matches
+  // the class the inline script in index.html already set before paint - the
+  // apply effect below then keeps the class instead of stripping it (no flash).
+  const [darkMode, setDarkMode] = useState(() => {
+    try {
+      return localStorage.getItem('darkMode') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [cameraHeight, setCameraHeight] = useState(1000);
   // Detection sensitivity (higher = stricter, fewer false positives).
   const [confThreshold, setConfThreshold] = useState(0.40);
   // Drop boxes that are too elongated (probably leaves, not crowns).
   const [aspectRatioFilter, setAspectRatioFilter] = useState(true);
 
-  // Load saved settings on first render.
+  // Load saved settings on first render. (darkMode is handled by the lazy
+  // initialiser above so it can take effect before paint.)
   useEffect(() => {
-    const savedDark = localStorage.getItem('darkMode') === 'true';
     const savedHeight = parseFloat(localStorage.getItem('cameraHeight') || '1000');
     const savedConf = parseFloat(localStorage.getItem('confThreshold') || '0.40');
     const savedArf = localStorage.getItem('aspectRatioFilter');
-    setDarkMode(savedDark);
     setCameraHeight(savedHeight);
     setConfThreshold(savedConf);
     // Default to true if not set yet.
