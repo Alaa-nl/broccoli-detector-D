@@ -8,7 +8,6 @@ does not need to know about Ultralytics.
 
 import hashlib
 import logging
-import os
 import secrets
 import threading
 import time
@@ -21,6 +20,8 @@ from PIL import Image
 # We import YOLO from ultralytics. This is the same library
 # we used in Deliverable B for training.
 from ultralytics import YOLO
+
+from app import config
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class BroccoliDetector:
     def __init__(
         self,
         weights_path: str,
-        conf_threshold: float = 0.25,
+        conf_threshold: float = config.DETECTOR_DEFAULT_CONF,
         expected_sha256: Optional[str] = None,
     ):
         """Load the model from a .pt file.
@@ -56,7 +57,7 @@ class BroccoliDetector:
         """
         self.weights_path = Path(weights_path)
         self.conf_threshold = conf_threshold
-        self.expected_sha256 = expected_sha256 or os.getenv("EXPECTED_WEIGHTS_SHA256")
+        self.expected_sha256 = expected_sha256 or config.EXPECTED_WEIGHTS_SHA256
 
         # The Ultralytics YOLO model is NOT thread-safe: its internal
         # predictor reuses buffers/state between calls, and the Results

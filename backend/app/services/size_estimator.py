@@ -41,24 +41,23 @@ to calibrate the estimate against a known reference.
 import math
 from typing import Tuple
 
+from app import config
+
 
 class SizeEstimator:
     """Convert bounding box pixel size to crown diameter in mm."""
 
-    # Horizontal field of view of the Intel RealSense D415, in degrees.
-    # Source: Intel RealSense D415 datasheet (69.4 H x 42.5 V).
-    DEFAULT_FOV_HORIZONTAL_DEG = 69.4
+    # Horizontal field of view of the Intel RealSense D415, in degrees
+    # (Intel datasheet: 69.4 H x 42.5 V). Sourced from config.
+    DEFAULT_FOV_HORIZONTAL_DEG = config.FOV_HORIZONTAL_DEG
 
-    # Default camera height above the ground in millimetres.
-    # 1000 mm = 1 metre, which matches a person walking with
-    # the camera held at hip / waist level.
-    DEFAULT_CAMERA_HEIGHT_MM = 1000.0
+    # Default camera height above the ground in millimetres (1000 mm = 1 m,
+    # a person walking with the camera at hip/waist level). Sourced from config.
+    DEFAULT_CAMERA_HEIGHT_MM = config.DEFAULT_CAMERA_HEIGHT_MM
 
-    # Thresholds (in mm) for the friendly size labels.
-    # Based on common retail size grades for broccoli crowns.
-    SMALL_MAX_MM = 80.0   # < 8 cm = small / immature
-    MEDIUM_MAX_MM = 130.0  # 8-13 cm = medium (good for retail)
-    # >= 130 mm = large
+    # Thresholds (in mm) for the friendly size labels (common retail grades).
+    SMALL_MAX_MM = config.SIZE_SMALL_MAX_MM    # < 8 cm = small / immature
+    MEDIUM_MAX_MM = config.SIZE_MEDIUM_MAX_MM  # 8-13 cm = medium; >= large
 
     def __init__(
         self,

@@ -12,7 +12,6 @@ import logging
 import os
 import random
 import secrets
-from pathlib import Path
 from typing import Optional
 
 from fastapi import (
@@ -27,6 +26,7 @@ from fastapi import (
 )
 from starlette.concurrency import run_in_threadpool
 
+from app import config
 from app.models.schemas import (
     BoundingBox,
     CrownDetection,
@@ -49,10 +49,10 @@ logger = logging.getLogger(__name__)
 # injects the same value as the X-API-Key header (the browser never sees
 # it).
 
-# Rate-limit configuration (per client IP). Defaults to 10 requests/min.
-RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "10"))
-RATE_LIMIT_WINDOW_SECONDS = float(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-_rate_limiter = RateLimiter(RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SECONDS)
+# Rate-limit configuration (per client IP) comes from config.
+_rate_limiter = RateLimiter(
+    config.RATE_LIMIT_MAX, config.RATE_LIMIT_WINDOW_SECONDS
+)
 
 
 def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
@@ -105,26 +105,22 @@ def rate_limit(request: Request) -> None:
 # separate router, so monitoring stays open and unthrottled.
 router = APIRouter(dependencies=[Depends(require_api_key), Depends(rate_limit)])
 
-# Folder where uploads and annotated images are stored.
-# This must match the path used in main.py.
-UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
-
 
 @router.post("/detect", response_model=DetectionResponse)
 async def detect_broccoli(
     request: Request,
     file: UploadFile = File(..., description="A JPG or PNG broccoli image."),
     camera_height_mm: float = Form(
-        default=1000.0,
-        gt=100,
-        lt=5000,
+        default=config.DEFAULT_CAMERA_HEIGHT_MM,
+        gt=config.CAMERA_HEIGHT_MIN_MM,
+        lt=config.CAMERA_HEIGHT_MAX_MM,
         description="Camera height above the ground in mm (default 1000 mm = "
                     "1 metre). Must be between 100 and 5000 mm.",
     ),
     conf_threshold: float = Form(
-        default=0.40,
-        ge=0.05,
-        le=0.95,
+        default=config.API_DEFAULT_CONF,
+        ge=config.CONF_MIN,
+        le=config.CONF_MAX,
         description="Minimum confidence (0-1). Higher = fewer false "
                     "positives but also fewer detections. Default 0.4.",
     ),
@@ -145,7 +141,7 @@ async def detect_broccoli(
       6. Return a JSON response with all the results.
     """
     # --- Step 1: save the upload ---
-    uploader = ImageUploader(upload_dir=UPLOAD_DIR)
+    uploader = ImageUploader(upload_dir=config.UPLOAD_DIR)
     saved_path, image_id, pil_image = await uploader.save(file)
 
     img_width = pil_image.width
@@ -182,7 +178,7 @@ async def detect_broccoli(
     # Boxes that are much wider than tall (or much taller than wide)
     # are usually leaves, not crowns. We drop them when enabled.
     if aspect_ratio_filter:
-        max_ratio = 1.6  # Allow some tolerance
+        max_ratio = config.ASPECT_MAX_RATIO
         kept = []
         for det in raw_detections:
             w = det["x2"] - det["x1"]
@@ -238,7 +234,7 @@ async def detect_broccoli(
 
     # --- Step 5: draw the boxes ---
     annotated_filename = f"{image_id}_annotated.jpg"
-    annotated_path = UPLOAD_DIR / annotated_filename
+    annotated_path = config.UPLOAD_DIR / annotated_filename
     # Drawing the boxes and JPEG-encoding the result (annotated.save)
     # is also blocking, so offload it to a worker thread too.
     await run_in_threadpool(

@@ -10,7 +10,6 @@ import asyncio
 import contextvars
 import json
 import logging
-import os
 import re
 import time
 import uuid
@@ -22,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import config
 from app.api import detect, health
 from app.services.detector import BroccoliDetector
 
@@ -63,7 +63,7 @@ class _RequestIDLogFilter(logging.Filter):
 # request (see RequestIDMiddleware). Output still goes to stdout, so
 # Docker/Render log capture is unchanged.
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    level=config.LOG_LEVEL,
     format="%(asctime)s %(levelname)s %(name)s [%(request_id)s]: %(message)s",
 )
 # Attach the filter to the root handler(s) basicConfig just created, so every
@@ -76,48 +76,10 @@ for _handler in logging.getLogger().handlers:
 logger = logging.getLogger(__name__)
 
 
-# Path to the trained YOLOv8n weights file.
-# In Deliverable B we trained the model and saved best.pt here.
-WEIGHTS_PATH = Path(__file__).parent.parent / "weights" / "best.pt"
-
-# Folder where uploaded images are saved.
-UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
-
-# Retention policy for saved uploads/annotated images. Without a
-# sweep the uploads dir grows forever and every field photo stays publicly
-# downloadable indefinitely. We delete files older than UPLOAD_TTL_SECONDS,
-# checking every UPLOAD_SWEEP_SECONDS. The TTL is far longer than a request
-# so the frontend can still fetch /uploads/... after the JSON response.
-UPLOAD_TTL_SECONDS = int(os.getenv("UPLOAD_TTL_SECONDS", "3600"))      # 60 min
-UPLOAD_SWEEP_SECONDS = int(os.getenv("UPLOAD_SWEEP_SECONDS", "600"))   # 10 min
-
-# Hard cap on the size of any incoming request body. nginx already caps
-# the proxied path (client_max_body_size 15M), but a client can reach the
-# backend directly, so we enforce the same bound here independent of the
-# proxy. 15 MB leaves headroom above the 10 MB image limit for multipart
-# boundaries and the form fields.
-MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
-
-# When DEPLOY_ENV=production, hide the interactive API docs and OpenAPI
-# schema so the public backend does not advertise its endpoints. Local dev
-# and docker compose leave it unset (dev), keeping /docs available.
-DEPLOY_ENV = os.getenv("DEPLOY_ENV", "dev")
-_is_prod = DEPLOY_ENV.strip().lower() == "production"
-
-# CORS origins allowed to call the API from a browser. Comma-separated,
-# overridable via env. Defaults cover local dev (Vite :5173, compose :8080).
-# The deployed app calls the backend same-origin through the proxy, so CORS
-# is not exercised there; set this only if a browser must call the backend
-# cross-origin directly.
-CORS_ALLOW_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ALLOW_ORIGINS",
-        "http://localhost:5173,http://localhost:8080",
-    ).split(",")
-    if origin.strip()
-]
+# All paths, env-overridable settings, and tunables live in app/config.py
+# (single source of truth). The only thing we keep here is the startup
+# side-effect: make sure the uploads directory exists.
+config.UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 async def _retention_sweep(upload_dir: Path, ttl: int, interval: int):
@@ -321,20 +283,19 @@ async def lifespan(app: FastAPI):
     """
     # Load the YOLOv8n model into memory one time.
     # We store it on app.state so any route can use it.
-    logger.info("Loading YOLOv8n model from: %s", WEIGHTS_PATH.name)
-    app.state.detector = BroccoliDetector(weights_path=str(WEIGHTS_PATH))
+    logger.info("Loading YOLOv8n model from: %s", config.WEIGHTS_PATH.name)
+    app.state.detector = BroccoliDetector(weights_path=str(config.WEIGHTS_PATH))
     # Expose the uploads dir so routes (e.g. /api/ready) can find it without
     # re-deriving the path or importing main (which would be circular).
-    app.state.upload_dir = UPLOAD_DIR
+    app.state.upload_dir = config.UPLOAD_DIR
 
     # Fail fast in production: if the model did not load (best.pt missing),
     # refuse to boot so a misconfigured deploy crashes loudly instead of
     # serving 503s forever. Frontend devs can set ALLOW_MISSING_WEIGHTS=1
     # to run the UI without the weights file.
-    allow_missing = os.getenv("ALLOW_MISSING_WEIGHTS", "").lower() in ("1", "true", "yes")
-    if not app.state.detector.is_ready() and not allow_missing:
+    if not app.state.detector.is_ready() and not config.ALLOW_MISSING_WEIGHTS:
         raise RuntimeError(
-            f"YOLO model failed to load from {WEIGHTS_PATH.name}. "
+            f"YOLO model failed to load from {config.WEIGHTS_PATH.name}. "
             f"Set ALLOW_MISSING_WEIGHTS=1 to start without it (frontend dev only)."
         )
 
@@ -349,12 +310,14 @@ async def lifespan(app: FastAPI):
     # Start the background sweep that deletes old uploaded/annotated images
     # so the disk cannot grow without bound.
     sweep_task = asyncio.create_task(
-        _retention_sweep(UPLOAD_DIR, UPLOAD_TTL_SECONDS, UPLOAD_SWEEP_SECONDS)
+        _retention_sweep(
+            config.UPLOAD_DIR, config.UPLOAD_TTL_SECONDS, config.UPLOAD_SWEEP_SECONDS
+        )
     )
     logger.info(
         "Upload retention sweep started (ttl=%ss, interval=%ss).",
-        UPLOAD_TTL_SECONDS,
-        UPLOAD_SWEEP_SECONDS,
+        config.UPLOAD_TTL_SECONDS,
+        config.UPLOAD_SWEEP_SECONDS,
     )
 
     yield
@@ -375,9 +338,9 @@ app = FastAPI(
                 "and estimates the size of each crown.",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url=None if _is_prod else "/docs",
-    redoc_url=None if _is_prod else "/redoc",
-    openapi_url=None if _is_prod else "/openapi.json",
+    docs_url=None if config.IS_PROD else "/docs",
+    redoc_url=None if config.IS_PROD else "/redoc",
+    openapi_url=None if config.IS_PROD else "/openapi.json",
 )
 
 # Allow the React frontend to call this API from a browser. Origins come
@@ -388,14 +351,14 @@ app = FastAPI(
 # send Content-Type (for the multipart upload).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_origins=config.CORS_ALLOW_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
 
 # Reject oversized request bodies before they are buffered.
-app.add_middleware(BodySizeLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES)
+app.add_middleware(BodySizeLimitMiddleware, max_body_size=config.MAX_REQUEST_BODY_BYTES)
 
 # Assign a correlation id to every request. Added LAST so it is the OUTERMOST
 # middleware: it runs first on the way in (the id is set before anything else
@@ -405,7 +368,7 @@ app.add_middleware(BodySizeLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES
 app.add_middleware(RequestIDMiddleware)
 
 # Serve uploaded and result images as static files so the frontend can show them.
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/uploads", StaticFiles(directory=str(config.UPLOAD_DIR)), name="uploads")
 
 # Connect the route files.
 app.include_router(health.router, prefix="/api", tags=["health"])
@@ -417,6 +380,6 @@ def root():
     """Simple welcome message at the root URL."""
     info = {"message": "Broccoli Crown Detection API is running."}
     # Only advertise the docs when they are actually enabled (dev).
-    if not _is_prod:
+    if not config.IS_PROD:
         info["docs"] = "/docs"
     return info

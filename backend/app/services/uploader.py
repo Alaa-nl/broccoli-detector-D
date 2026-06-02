@@ -13,11 +13,13 @@ from typing import Tuple
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 
+from app import config
+
 # Reject images whose decoded pixel count would blow up memory
 # (a "decompression bomb": a tiny file that expands to enormous
 # dimensions). Setting this at import time also arms Pillow's own
 # guard, which raises Image.DecompressionBombError during decode.
-Image.MAX_IMAGE_PIXELS = 25_000_000  # ~25 megapixels
+Image.MAX_IMAGE_PIXELS = config.MAX_IMAGE_PIXELS
 
 
 class ImageUploader:
@@ -34,18 +36,17 @@ class ImageUploader:
     # fully server-controlled. Anything not in this map is rejected.
     FORMAT_TO_EXT = {"JPEG": ".jpg", "PNG": ".png"}
 
-    # Max file size in bytes. 10 MB is enough for any field photo
-    # and matches the limit shown on the Upload screen.
-    MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+    # Max file size in bytes (matches the limit shown on the Upload screen).
+    MAX_FILE_SIZE_BYTES = config.MAX_FILE_SIZE_BYTES
 
     # Max decoded image size in pixels (width * height). Bounds the
     # memory used by .convert("RGB") and the later np.array() in the
     # detector, independent of the on-disk file size above.
-    MAX_IMAGE_PIXELS = 25_000_000  # ~25 megapixels
+    MAX_IMAGE_PIXELS = config.MAX_IMAGE_PIXELS
 
     # Read the upload in chunks so we can abort on an oversized body
     # before the whole thing is buffered into memory.
-    READ_CHUNK_BYTES = 64 * 1024  # 64 KB
+    READ_CHUNK_BYTES = config.READ_CHUNK_BYTES
 
     def __init__(self, upload_dir: Path):
         """Set up the uploader with the target folder.
