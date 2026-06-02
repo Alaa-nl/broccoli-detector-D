@@ -28,7 +28,6 @@ export default function Upload({
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  const fileInputRef = useRef(null);
   // Holds the in-flight request's controller so Cancel (and the timeout
   // watchdog) can abort it. Null when no request is running.
   const abortRef = useRef(null);
@@ -136,13 +135,14 @@ export default function Upload({
         </p>
       </header>
 
-      {/* Drop zone. */}
-      <div
+      {/* Drop zone. A <label> wrapping the file input so clicking, dragging,
+          and keyboard focus (Tab to the input, Enter/Space to open the
+          picker) all work natively. */}
+      <label
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`card p-8 text-center cursor-pointer border-2 border-dashed transition-colors ${
+        className={`card p-8 text-center cursor-pointer border-2 border-dashed transition-colors block focus-within:ring-2 focus-within:ring-broccoli-500 ${
           isDragging
             ? 'border-broccoli-500 bg-broccoli-50 dark:bg-gray-700'
             : 'border-gray-300 dark:border-gray-600 hover:border-broccoli-400'
@@ -177,15 +177,15 @@ export default function Upload({
           </div>
         )}
 
-        {/* Hidden file input, triggered by the click above. */}
+        {/* Visually hidden but kept in the tab order (sr-only, not hidden),
+            so keyboard users can focus it and open the picker. */}
         <input
-          ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png"
           onChange={(e) => pickFile(e.target.files?.[0])}
-          className="hidden"
+          className="sr-only"
         />
-      </div>
+      </label>
 
       {/* Tips card. */}
       <div className="card p-4 bg-yellow-50 dark:bg-gray-800 border-yellow-200 dark:border-yellow-900">

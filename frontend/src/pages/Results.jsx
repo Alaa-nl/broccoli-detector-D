@@ -16,6 +16,10 @@ export default function Results({ detection }) {
   // Which crown the user has clicked on (for highlight).
   const [selectedId, setSelectedId] = useState(null);
 
+  // Toggle a crown's expanded details (shared by click and keyboard).
+  const toggleCrown = (id) =>
+    setSelectedId((prev) => (prev === id ? null : id));
+
   // If the user lands here directly without running detection,
   // send them to the Upload page with a friendly message.
   if (!detection) {
@@ -108,10 +112,17 @@ export default function Results({ detection }) {
             {crowns.map((crown) => (
               <li
                 key={crown.crown_id}
-                onClick={() => setSelectedId(
-                  selectedId === crown.crown_id ? null : crown.crown_id
-                )}
-                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                role="button"
+                tabIndex={0}
+                aria-expanded={selectedId === crown.crown_id}
+                onClick={() => toggleCrown(crown.crown_id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleCrown(crown.crown_id);
+                  }
+                }}
+                className={`p-3 rounded-lg border cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-broccoli-500 ${
                   selectedId === crown.crown_id
                     ? 'bg-broccoli-50 dark:bg-gray-700 border-broccoli-400'
                     : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'

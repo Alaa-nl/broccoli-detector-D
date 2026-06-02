@@ -89,6 +89,20 @@ describe('Upload abort/timeout', () => {
   });
 });
 
+describe('Upload drop-zone accessibility', () => {
+  it('exposes the file input via its drop-zone label and keeps it focusable', () => {
+    renderUpload();
+
+    // The input is associated with the label, so assistive tech announces it.
+    const input = screen.getByLabelText(/drag & drop/i);
+    expect(input).toHaveAttribute('type', 'file');
+
+    // sr-only keeps it in the tab order (unlike `hidden`, which is display:none).
+    expect(input).toHaveClass('sr-only');
+    expect(input).not.toHaveClass('hidden');
+  });
+});
+
 describe('Upload object URL lifecycle', () => {
   let revokeSpy;
 
