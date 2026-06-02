@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
+import { getHealth } from '../api/client';
 
 // Give up on the health check after this long so it can't sit on
 // "checking..." forever if the backend never answers.
@@ -37,8 +38,7 @@ export default function Settings({
       controller.abort();
     }, HEALTH_TIMEOUT_MS);
 
-    fetch('/api/health', { signal: controller.signal })
-      .then((res) => res.json())
+    getHealth({ signal: controller.signal })
       .then((data) => setHealth(data))
       .catch((err) => {
         // Ignore an unmount-abort; a real timeout or network error still

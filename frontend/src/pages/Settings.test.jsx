@@ -1,4 +1,4 @@
-// Tests for the Settings page's health-check abort behaviour (P5-2).
+// Tests for the Settings page's health-check abort behaviour.
 
 import { render, screen } from '@testing-library/react';
 import Settings from './Settings.jsx';
@@ -42,6 +42,7 @@ describe('Settings health check', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        ok: true,
         json: async () => ({ status: 'ok', model_loaded: true }),
       }),
     );

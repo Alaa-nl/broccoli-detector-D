@@ -1,4 +1,4 @@
-// Tests for the Upload page's abort/timeout behaviour (P5-2).
+// Tests for the Upload page's abort/timeout behaviour.
 
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

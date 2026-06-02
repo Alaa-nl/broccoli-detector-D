@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud, FileImage, AlertCircle, Loader2 } from 'lucide-react';
+import { detectImage } from '../api/client';
 
 // Files larger than this are rejected on the client too,
 // so the user gets fast feedback (the backend also checks).
@@ -97,22 +98,7 @@ export default function Upload({
     formData.append('aspect_ratio_filter', String(aspectRatioFilter));
 
     try {
-      const response = await fetch('/api/detect', {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        // Try to read the error message that FastAPI sends back, plus the
-        // request id from the response header so the user can quote it to us.
-        const errorBody = await response.json().catch(() => ({}));
-        const ref = response.headers.get('X-Request-ID');
-        const message = errorBody.detail || `Server returned ${response.status}`;
-        throw new Error(ref ? `${message} (ref: ${ref})` : message);
-      }
-
-      const data = await response.json();
+      const data = await detectImage(formData, { signal: controller.signal });
       onDetected(data);
 
       // Move on to the results page.
@@ -125,7 +111,8 @@ export default function Upload({
             : 'Detection cancelled.'
         );
       } else {
-        console.error(err);
+        // The client already logs the failure (dev only); just surface the
+        // message it built (which includes the support ref when present).
         setError(err.message || 'Something went wrong. Please try again.');
       }
     } finally {
