@@ -32,10 +32,14 @@ export default function Results({ detection }) {
     );
   }
 
+  // Treat a missing/malformed crowns field as an empty list so a corrupt
+  // payload renders an empty result instead of throwing.
+  const crowns = Array.isArray(detection.crowns) ? detection.crowns : [];
+  const numCrowns = detection.num_crowns ?? crowns.length;
+
   // Build a small summary at the top.
-  const avgDiameter = detection.crowns.length > 0
-    ? detection.crowns.reduce((sum, c) => sum + c.diameter_cm, 0) /
-      detection.crowns.length
+  const avgDiameter = crowns.length > 0
+    ? crowns.reduce((sum, c) => sum + (c.diameter_cm ?? 0), 0) / crowns.length
     : 0;
 
   return (
@@ -65,7 +69,7 @@ export default function Results({ detection }) {
         <SummaryCard
           icon={<Camera className="w-5 h-5" />}
           label="Crowns found"
-          value={detection.num_crowns}
+          value={numCrowns}
         />
         <SummaryCard
           icon={<Ruler className="w-5 h-5" />}
@@ -75,29 +79,33 @@ export default function Results({ detection }) {
         <SummaryCard
           icon={<Zap className="w-5 h-5" />}
           label="Speed"
-          value={`${detection.inference_time_ms.toFixed(0)} ms`}
+          value={
+            Number.isFinite(detection.inference_time_ms)
+              ? `${detection.inference_time_ms.toFixed(0)} ms`
+              : '-'
+          }
         />
         <SummaryCard
           icon={<Camera className="w-5 h-5" />}
           label="Image size"
-          value={`${detection.image_width}\u00d7${detection.image_height}`}
+          value={`${detection.image_width ?? '?'}\u00d7${detection.image_height ?? '?'}`}
         />
       </div>
 
       {/* List of detected crowns. */}
       <section className="card p-5">
         <h2 className="font-semibold mb-3">
-          Detected Crowns ({detection.num_crowns})
+          Detected Crowns ({numCrowns})
         </h2>
 
-        {detection.crowns.length === 0 ? (
+        {crowns.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
             The model did not find any crowns in this image. Try another
             photo, or check that the crown is clearly visible.
           </p>
         ) : (
           <ul className="space-y-2">
-            {detection.crowns.map((crown) => (
+            {crowns.map((crown) => (
               <li
                 key={crown.crown_id}
                 onClick={() => setSelectedId(
@@ -116,13 +124,16 @@ export default function Results({ detection }) {
                     </span>
                     <div className="min-w-0">
                       <div className="font-semibold">
-                        {crown.diameter_cm.toFixed(1)} cm
+                        {crown.diameter_cm?.toFixed(1) ?? '-'} cm
                         <span className="text-gray-500 dark:text-gray-400 font-normal ml-2 text-sm">
-                          ({crown.diameter_mm.toFixed(0)} mm)
+                          ({crown.diameter_mm?.toFixed(0) ?? '-'} mm)
                         </span>
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Confidence: {(crown.confidence * 100).toFixed(1)}%
+                        Confidence:{' '}
+                        {Number.isFinite(crown.confidence)
+                          ? `${(crown.confidence * 100).toFixed(1)}%`
+                          : '-'}
                       </div>
                     </div>
                   </div>
@@ -139,15 +150,20 @@ export default function Results({ detection }) {
                 {selectedId === crown.crown_id && (
                   <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400 space-y-1">
                     <div>
-                      Bounding box: ({crown.bbox.x1.toFixed(0)},{' '}
-                      {crown.bbox.y1.toFixed(0)}) to (
-                      {crown.bbox.x2.toFixed(0)},{' '}
-                      {crown.bbox.y2.toFixed(0)})
+                      Bounding box: ({crown.bbox?.x1?.toFixed(0) ?? '-'},{' '}
+                      {crown.bbox?.y1?.toFixed(0) ?? '-'}) to (
+                      {crown.bbox?.x2?.toFixed(0) ?? '-'},{' '}
+                      {crown.bbox?.y2?.toFixed(0) ?? '-'})
                     </div>
                     <div>
                       Size in pixels:{' '}
-                      {(crown.bbox.x2 - crown.bbox.x1).toFixed(0)} x{' '}
-                      {(crown.bbox.y2 - crown.bbox.y1).toFixed(0)}
+                      {Number.isFinite(crown.bbox?.x2) && Number.isFinite(crown.bbox?.x1)
+                        ? (crown.bbox.x2 - crown.bbox.x1).toFixed(0)
+                        : '-'}{' '}
+                      x{' '}
+                      {Number.isFinite(crown.bbox?.y2) && Number.isFinite(crown.bbox?.y1)
+                        ? (crown.bbox.y2 - crown.bbox.y1).toFixed(0)
+                        : '-'}
                     </div>
                   </div>
                 )}
@@ -162,14 +178,16 @@ export default function Results({ detection }) {
         <div>
           <strong>Size estimate:</strong> bounding box converted to mm
           using a pinhole camera model with the camera at{' '}
-          {detection.camera_height_mm} mm above the ground (Intel RealSense
-          D415, 69.4° horizontal field of view). Change camera height in
-          Settings to calibrate.
+          {detection.camera_height_mm ?? '?'} mm above the ground (Intel
+          RealSense D415, 69.4° horizontal field of view). Change camera
+          height in Settings to calibrate.
         </div>
         <div>
           <strong>Filters:</strong> minimum confidence{' '}
-          {(detection.conf_threshold * 100).toFixed(0)}% ·{' '}
-          leaf filter {detection.aspect_ratio_filter ? 'on' : 'off'}
+          {Number.isFinite(detection.conf_threshold)
+            ? `${(detection.conf_threshold * 100).toFixed(0)}%`
+            : '-'}{' '}
+          · leaf filter {detection.aspect_ratio_filter ? 'on' : 'off'}
           {detection.num_filtered > 0 && (
             <span>
               {' '}· removed {detection.num_filtered} elongated box

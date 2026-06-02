@@ -98,6 +98,31 @@ describe('App detection persistence', () => {
   });
 });
 
+describe('App settings clamp-on-load', () => {
+  // The Upload footer reads cameraHeight/confThreshold live from props,
+  // so it reflects whatever App restored (and clamped) from localStorage.
+  it('falls back to defaults for corrupt stored values', () => {
+    localStorage.setItem('cameraHeight', 'NaN');
+    localStorage.setItem('confThreshold', 'abc');
+
+    renderAppAt('/upload');
+
+    expect(screen.getByText('1000 mm')).toBeInTheDocument();
+    expect(screen.getByText('40%')).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
+  it('clamps out-of-range stored values to their bounds', () => {
+    localStorage.setItem('cameraHeight', '999999');
+    localStorage.setItem('confThreshold', '999');
+
+    renderAppAt('/upload');
+
+    expect(screen.getByText('5000 mm')).toBeInTheDocument();
+    expect(screen.getByText('90%')).toBeInTheDocument();
+  });
+});
+
 describe('App dark-mode (no FOUC)', () => {
   it('keeps the pre-set dark class on mount instead of stripping it', () => {
     localStorage.setItem('darkMode', 'true');

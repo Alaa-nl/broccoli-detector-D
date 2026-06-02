@@ -5,17 +5,23 @@
 // Results page (which shows it).
 
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 import BottomNav from './components/BottomNav.jsx';
 import Header from './components/Header.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Home from './pages/Home.jsx';
 import Upload from './pages/Upload.jsx';
 import Results from './pages/Results.jsx';
 import Settings from './pages/Settings.jsx';
 import About from './pages/About.jsx';
+import { clampNumber } from './utils/number.js';
 
 export default function App() {
+  // Used as the error-boundary key below, so navigating to another tab
+  // remounts the boundary and clears a crash without a full reload.
+  const location = useLocation();
+
   // The latest detection result. The Upload page sets it, the Results page
   // reads it. It is persisted to sessionStorage so a refresh, a new tab, or a
   // shared /results URL doesn't discard the result the user just waited for.
@@ -50,8 +56,10 @@ export default function App() {
   // Load saved settings on first render. (darkMode is handled by the lazy
   // initialiser above so it can take effect before paint.)
   useEffect(() => {
-    const savedHeight = parseFloat(localStorage.getItem('cameraHeight') || '1000');
-    const savedConf = parseFloat(localStorage.getItem('confThreshold') || '0.40');
+    // Clamp restored values so a corrupt or out-of-range stored setting
+    // (e.g. "NaN", or a height of 999999) can't leak into the UI or a request.
+    const savedHeight = clampNumber(localStorage.getItem('cameraHeight'), 100, 5000, 1000);
+    const savedConf = clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.90, 0.40);
     const savedArf = localStorage.getItem('aspectRatioFilter');
     setCameraHeight(savedHeight);
     setConfThreshold(savedConf);
@@ -98,6 +106,7 @@ export default function App() {
       <Header />
 
       <main className="max-w-3xl mx-auto px-4 py-6">
+        <ErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route
@@ -135,6 +144,7 @@ export default function App() {
           {/* Fallback: any unknown URL goes home. */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </main>
 
       <BottomNav />
