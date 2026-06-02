@@ -36,6 +36,13 @@ USER appuser
 # Tell Docker which port the app uses.
 EXPOSE 8000
 
+# Report container health from /api/health (200 = model loaded; 503 = degraded
+# when the model isn't loaded). The slim image has no curl, so use Python's
+# stdlib urllib, which exits non-zero on any non-2xx or connection error.
+# start-period gives the YOLO model time to load before failures count.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+
 # Start the server. We use 0.0.0.0 so it is reachable from outside the
 # container. --limit-concurrency caps how many requests can be in flight
 # at once so a burst of uploads can't pile up unbounded on the single

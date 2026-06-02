@@ -38,8 +38,13 @@ services:
     container_name: broccoli-frontend
     ports:
       - "8080:80"
+    # Wait until the backend reports healthy before starting nginx. The
+    # backend's HEALTHCHECK (in backend/Dockerfile) hits /api/health, which is
+    # 200 only once the model is loaded - so the proxy never forwards to a
+    # not-ready backend (502) during a cold start.
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     environment:
       # Use Docker's embedded DNS so nginx can resolve "backend" by
