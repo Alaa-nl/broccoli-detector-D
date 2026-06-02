@@ -1,0 +1,26 @@
+# Keep the backend build context lean and avoid baking runtime/dev artifacts
+# into the image.
+#
+# NOTE: weights/ (best.pt) is intentionally NOT ignored. Render runs the baked
+# image with no weights mount, so the model must ship inside the image.
+
+# Runtime-generated uploads (user images) - never bake these in.
+uploads/
+
+# Python caches / test caches. Use **/ so nested caches (app/__pycache__,
+# app/api/__pycache__, ...) are excluded too - a bare pattern only matches the
+# context root, not subdirectories.
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+# Local virtualenvs (created at the context root in dev).
+.venv/
+venv/
+
+# Local env files (secrets) and docs (not needed at runtime).
+# Use **/*.md so nested docs (e.g. weights/README.md) are excluded too -
+# a bare *.md only matches the context root.
+.env
+.env.*
+**/*.md
