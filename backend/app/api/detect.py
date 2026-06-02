@@ -185,7 +185,6 @@ async def detect_broccoli(
 
     # --- Step 4: convert each box into a CrownDetection ---
     size_estimator = SizeEstimator(camera_height_mm=camera_height_mm)
-    crowns_for_annotator = []
     crown_models = []
 
     for i, det in enumerate(raw_detections, start=1):
@@ -198,20 +197,6 @@ async def detect_broccoli(
             image_width_px=img_width,
         )
 
-        crown_dict = {
-            "crown_id": i,
-            "bbox": {
-                "x1": det["x1"], "y1": det["y1"],
-                "x2": det["x2"], "y2": det["y2"],
-            },
-            "confidence": det["confidence"],
-            "diameter_mm": diameter_mm,
-            "diameter_cm": diameter_cm,
-            "size_category": category,
-        }
-        crowns_for_annotator.append(crown_dict)
-
-        # Also build the Pydantic model for the response.
         crown_models.append(CrownDetection(
             crown_id=i,
             bbox=BoundingBox(
@@ -227,12 +212,14 @@ async def detect_broccoli(
     # --- Step 5: draw the boxes ---
     annotated_filename = f"{image_id}_annotated.jpg"
     annotated_path = config.UPLOAD_DIR / annotated_filename
-    # Drawing the boxes and JPEG-encoding the result (annotated.save)
-    # is also blocking, so offload it to a worker thread too.
+    # Drawing the boxes and JPEG-encoding the result (annotated.save) is also
+    # blocking, so offload it. The annotator takes plain dicts; derive them
+    # from the models we already built (model_dump gives the same nested
+    # shape) instead of maintaining a second hand-built list.
     await run_in_threadpool(
         draw_detections,
         pil_image,
-        crowns_for_annotator,
+        [crown.model_dump() for crown in crown_models],
         annotated_path,
     )
 
