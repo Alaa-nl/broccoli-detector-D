@@ -5,6 +5,10 @@
 import { useEffect, useState } from 'react';
 import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
 
+// Give up on the health check after this long so it can't sit on
+// "checking..." forever if the backend never answers.
+const HEALTH_TIMEOUT_MS = 10000;
+
 export default function Settings({
   darkMode,
   setDarkMode,
@@ -23,10 +27,32 @@ export default function Settings({
   const [health, setHealth] = useState(null);
 
   useEffect(() => {
-    fetch('/api/health')
+    // Abort on a timeout (report unreachable) or on unmount (stay silent so
+    // we don't set state on a gone component). `timedOut` separates the two,
+    // since both surface as an AbortError.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, HEALTH_TIMEOUT_MS);
+
+    fetch('/api/health', { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setHealth(data))
-      .catch(() => setHealth({ status: 'unreachable', model_loaded: false }));
+      .catch((err) => {
+        // Ignore an unmount-abort; a real timeout or network error still
+        // reports the backend as unreachable.
+        if (err.name !== 'AbortError' || timedOut) {
+          setHealth({ status: 'unreachable', model_loaded: false });
+        }
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, []);
 
   function commitHeight() {

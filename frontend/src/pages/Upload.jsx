@@ -11,6 +11,10 @@ import { UploadCloud, FileImage, AlertCircle, Loader2 } from 'lucide-react';
 const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
 
+// Give up on a detection after this long so the UI can never get stuck
+// on "Detecting..." forever (CPU inference can be slow, but not endless).
+const DETECT_TIMEOUT_MS = 60000;
+
 export default function Upload({
   cameraHeight,
   confThreshold,
@@ -24,6 +28,9 @@ export default function Upload({
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef(null);
+  // Holds the in-flight request's controller so Cancel (and the timeout
+  // watchdog) can abort it. Null when no request is running.
+  const abortRef = useRef(null);
   const navigate = useNavigate();
 
   // Validate the chosen file (type + size).
@@ -60,6 +67,18 @@ export default function Upload({
     setError('');
     setIsLoading(true);
 
+    // Abort the request if it runs too long, so the button can't stay stuck
+    // on "Detecting..." forever. `timedOut` tells the catch block apart a
+    // watchdog abort from a user-initiated Cancel (both surface as
+    // AbortError) without relying on AbortSignal.reason.
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, DETECT_TIMEOUT_MS);
+
     // Build the multipart form data.
     const formData = new FormData();
     formData.append('file', file);
@@ -71,6 +90,7 @@ export default function Upload({
       const response = await fetch('/api/detect', {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -88,11 +108,26 @@ export default function Upload({
       // Move on to the results page.
       navigate('/results');
     } catch (err) {
-      console.error(err);
-      setError(err.message || 'Something went wrong. Please try again.');
+      if (err.name === 'AbortError') {
+        setError(
+          timedOut
+            ? 'Request timed out. The server may be busy - please try again.'
+            : 'Detection cancelled.'
+        );
+      } else {
+        console.error(err);
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
     } finally {
+      clearTimeout(timer);
+      abortRef.current = null;
       setIsLoading(false);
     }
+  }
+
+  // Let the user abort an in-flight detection immediately.
+  function cancelDetection() {
+    abortRef.current?.abort();
   }
 
   return (
@@ -190,6 +225,16 @@ export default function Upload({
           'Detect Broccoli'
         )}
       </button>
+
+      {/* Cancel button: only while a detection is in flight. */}
+      {isLoading && (
+        <button
+          onClick={cancelDetection}
+          className="btn-secondary w-full"
+        >
+          Cancel
+        </button>
+      )}
 
       <div className="text-xs text-gray-500 dark:text-gray-400 text-center space-y-1">
         <div>
