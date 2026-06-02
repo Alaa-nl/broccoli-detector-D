@@ -323,6 +323,9 @@ async def lifespan(app: FastAPI):
     # We store it on app.state so any route can use it.
     logger.info("Loading YOLOv8n model from: %s", WEIGHTS_PATH.name)
     app.state.detector = BroccoliDetector(weights_path=str(WEIGHTS_PATH))
+    # Expose the uploads dir so routes (e.g. /api/ready) can find it without
+    # re-deriving the path or importing main (which would be circular).
+    app.state.upload_dir = UPLOAD_DIR
 
     # Fail fast in production: if the model did not load (best.pt missing),
     # refuse to boot so a misconfigured deploy crashes loudly instead of
