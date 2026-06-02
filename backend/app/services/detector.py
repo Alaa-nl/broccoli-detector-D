@@ -151,7 +151,7 @@ class BroccoliDetector:
     def predict(
         self,
         image: Image.Image,
-        conf_threshold: float = None,
+        conf_threshold: Optional[float] = None,
     ) -> Tuple[List[dict], float]:
         """Run detection on one image.
 
@@ -228,14 +228,14 @@ class BroccoliDetector:
                 for i in range(len(boxes)):
                     # xyxy gives us [x1, y1, x2, y2] in original image pixels.
                     xyxy = boxes.xyxy[i].cpu().numpy()
-                    conf = float(boxes.conf[i].cpu().numpy())
+                    box_conf = float(boxes.conf[i].cpu().numpy())
 
                     detections.append({
                         "x1": float(xyxy[0]),
                         "y1": float(xyxy[1]),
                         "x2": float(xyxy[2]),
                         "y2": float(xyxy[3]),
-                        "confidence": conf,
+                        "confidence": box_conf,
                     })
 
         # Lock released: `detections` now holds only plain Python floats,
