@@ -33,8 +33,8 @@ function renderUpload() {
   );
 }
 
-const pngFile = () =>
-  new File([new Uint8Array([1, 2, 3])], 'broccoli.png', { type: 'image/png' });
+const pngFile = (name = 'broccoli.png') =>
+  new File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -86,5 +86,39 @@ describe('Upload abort/timeout', () => {
     expect(
       screen.getByRole('button', { name: /detect broccoli/i }),
     ).toBeInTheDocument();
+  });
+});
+
+describe('Upload object URL lifecycle', () => {
+  let revokeSpy;
+
+  beforeEach(() => {
+    // Distinct URLs per createObjectURL call so we can assert which one is
+    // revoked. Scoped to this block, so the abort/timeout tests are unaffected.
+    let n = 0;
+    URL.createObjectURL = vi.fn(() => `blob:url-${++n}`);
+    revokeSpy = vi.fn();
+    URL.revokeObjectURL = revokeSpy;
+  });
+
+  it('revokes the previous preview URL when a new file is chosen', async () => {
+    const user = userEvent.setup();
+    const { container } = renderUpload();
+    const input = container.querySelector('input[type="file"]');
+
+    await user.upload(input, pngFile('a.png')); // -> blob:url-1
+    await user.upload(input, pngFile('b.png')); // -> blob:url-2, revokes url-1
+
+    expect(revokeSpy).toHaveBeenCalledWith('blob:url-1');
+  });
+
+  it('revokes the preview URL on unmount', async () => {
+    const user = userEvent.setup();
+    const { container, unmount } = renderUpload();
+
+    await user.upload(container.querySelector('input[type="file"]'), pngFile()); // url-1
+    unmount();
+
+    expect(revokeSpy).toHaveBeenCalledWith('blob:url-1');
   });
 });

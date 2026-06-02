@@ -2,7 +2,7 @@
 // Lets the user drop or pick an image, sends it to the backend,
 // and navigates to the Results page when the response is ready.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud, FileImage, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -32,6 +32,16 @@ export default function Upload({
   // watchdog) can abort it. Null when no request is running.
   const abortRef = useRef(null);
   const navigate = useNavigate();
+
+  // Release the preview's object URL when it's replaced or the page
+  // unmounts, so picking many images doesn't leak blob: URLs. The cleanup
+  // runs only after the next render / on unmount, by which point the <img>
+  // already shows the new URL - so a URL still in use is never revoked.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   // Validate the chosen file (type + size).
   function pickFile(selected) {
