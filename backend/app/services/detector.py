@@ -36,16 +36,16 @@ class BroccoliDetector:
     def __init__(
         self,
         weights_path: str,
-        conf_threshold: float = config.DETECTOR_DEFAULT_CONF,
+        conf_threshold: float = config.DEFAULT_CONF,
         expected_sha256: Optional[str] = None,
     ):
         """Load the model from a .pt file.
 
         Args:
             weights_path: Path to best.pt (the trained model file).
-            conf_threshold: Minimum confidence to keep a detection.
-                The default 0.25 is the standard value used by
-                Ultralytics during evaluation.
+            conf_threshold: Minimum confidence to keep a detection. This is
+                only a fallback default; the /api/detect route always passes
+                an explicit value, so it is not used in the live path.
             expected_sha256: Known-good SHA-256 of the weights file. When
                 provided (or set via the EXPECTED_WEIGHTS_SHA256 env var),
                 the file is hashed and compared BEFORE it is handed to

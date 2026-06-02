@@ -139,11 +139,11 @@ async def detect_broccoli(
     request: Request,
     file: UploadFile = File(..., description="A JPG or PNG broccoli image."),
     conf_threshold: float = Form(
-        default=config.API_DEFAULT_CONF,
+        default=config.DEFAULT_CONF,
         ge=config.CONF_MIN,
         le=config.CONF_MAX,
-        description="Minimum confidence (0-1). Higher = fewer false "
-                    "positives but also fewer detections. Default 0.4.",
+        description="Minimum confidence (0.10-0.95). Higher = fewer false "
+                    "positives but also fewer detections. Default 0.40.",
     ),
     aspect_ratio_filter: bool = Form(
         default=True,
