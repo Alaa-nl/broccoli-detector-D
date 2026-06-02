@@ -33,6 +33,7 @@ from app.models.schemas import (
     DetectionResponse,
 )
 from app.services.annotator import draw_detections
+from app.services.detection_filters import filter_by_aspect_ratio
 from app.services.rate_limiter import RateLimiter
 from app.services.size_estimator import SizeEstimator
 from app.services.uploader import ImageUploader
@@ -174,20 +175,11 @@ async def detect_broccoli(
     detections_before_filter = len(raw_detections)
 
     # --- Step 3: optional aspect-ratio filter ---
-    # Real broccoli crowns are roughly square when seen from above.
-    # Boxes that are much wider than tall (or much taller than wide)
-    # are usually leaves, not crowns. We drop them when enabled.
+    # Real broccoli crowns are roughly square from above; very elongated
+    # boxes are usually leaves. The filter lives in app/services so it is
+    # reusable and unit-testable on its own.
     if aspect_ratio_filter:
-        max_ratio = config.ASPECT_MAX_RATIO
-        kept = []
-        for det in raw_detections:
-            w = det["x2"] - det["x1"]
-            h = det["y2"] - det["y1"]
-            if w > 0 and h > 0:
-                ratio = max(w, h) / min(w, h)
-                if ratio <= max_ratio:
-                    kept.append(det)
-        raw_detections = kept
+        raw_detections = filter_by_aspect_ratio(raw_detections)
 
     num_filtered = detections_before_filter - len(raw_detections)
 
