@@ -83,7 +83,17 @@ class SizeEstimator:
         Returns:
             Number of millimetres that one pixel represents
             at the ground plane.
+
+        Raises:
+            ValueError: If image_width_px is not positive (a 0/negative width
+                makes the scale factor undefined and would divide by zero).
         """
+        # A non-positive width is meaningless and would divide by zero below.
+        # Real uploads always have width >= 1, so this guards future/unit-test
+        # callers and makes the failure explicit instead of a ZeroDivisionError.
+        if image_width_px <= 0:
+            raise ValueError("image_width_px must be positive.")
+
         # Convert FOV from degrees to radians for math.tan().
         fov_rad = math.radians(self.fov_horizontal_deg)
 
