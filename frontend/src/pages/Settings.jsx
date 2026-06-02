@@ -229,8 +229,9 @@ export default function Settings({
         Reset to Defaults
       </button>
 
-      {/* Model info card (matches the wireframe in the TFGD). */}
-      <section className="card p-5 bg-gray-900 dark:bg-gray-800 text-white">
+      {/* Model info card: a normal card (light in light mode, dark in dark
+          mode), consistent with the other sections above. */}
+      <section className="card p-5">
         <h2 className="font-semibold mb-3">Model Information</h2>
         <dl className="text-sm space-y-1">
           <Row label="Architecture" value={MODEL_INFO.architecture} />
@@ -258,7 +259,7 @@ export default function Settings({
 function Row({ label, value }) {
   return (
     <div className="flex justify-between gap-3">
-      <dt className="text-gray-400">{label}</dt>
+      <dt className="text-gray-500 dark:text-gray-400">{label}</dt>
       <dd className="font-mono text-right">{value}</dd>
     </div>
   );
