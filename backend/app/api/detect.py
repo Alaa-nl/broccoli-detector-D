@@ -113,8 +113,10 @@ async def detect_broccoli(
     file: UploadFile = File(..., description="A JPG or PNG broccoli image."),
     camera_height_mm: float = Form(
         default=1000.0,
-        description="Camera height above the ground in mm "
-                    "(default 1000 mm = 1 metre).",
+        gt=100,
+        lt=5000,
+        description="Camera height above the ground in mm (default 1000 mm = "
+                    "1 metre). Must be between 100 and 5000 mm.",
     ),
     conf_threshold: float = Form(
         default=0.40,
