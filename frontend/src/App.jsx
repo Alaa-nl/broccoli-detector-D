@@ -16,9 +16,19 @@ import Settings from './pages/Settings.jsx';
 import About from './pages/About.jsx';
 
 export default function App() {
-  // The latest detection result. The Upload page sets it,
-  // the Results page reads it.
-  const [detection, setDetection] = useState(null);
+  // The latest detection result. The Upload page sets it, the Results page
+  // reads it. It is persisted to sessionStorage so a refresh, a new tab, or a
+  // shared /results URL doesn't discard the result the user just waited for.
+  // Lazy-init restores any saved result on first render; the effect below
+  // keeps the saved copy in sync. (getItem returns null when unset, and
+  // JSON.parse(null) is null, so the no-saved-result case is safe.)
+  const [detection, setDetection] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('lastDetection'));
+    } catch {
+      return null; // corrupt stored value — ignore and start fresh
+    }
+  });
 
   // User settings (saved in localStorage so they survive a reload).
   const [darkMode, setDarkMode] = useState(false);
@@ -63,6 +73,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('aspectRatioFilter', String(aspectRatioFilter));
   }, [aspectRatioFilter]);
+
+  // Persist the latest detection so the Results page survives a reload.
+  // A new detection overwrites the saved one; we never store an empty value.
+  useEffect(() => {
+    if (!detection) return;
+    try {
+      sessionStorage.setItem('lastDetection', JSON.stringify(detection));
+    } catch {
+      /* storage full or unavailable (e.g. private mode) — non-fatal */
+    }
+  }, [detection]);
 
   return (
     <div className="min-h-screen pb-24 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
