@@ -70,8 +70,8 @@ ASPECT_MAX_RATIO = 1.6         # leaf filter: drop boxes more elongated than thi
 
 # --- Size estimation -----------------------------------------------------
 DEFAULT_CAMERA_HEIGHT_MM = 1000.0   # 1 metre
-CAMERA_HEIGHT_MIN_MM = 100          # /api/detect form bound (gt)
-CAMERA_HEIGHT_MAX_MM = 5000         # /api/detect form bound (lt)
+CAMERA_HEIGHT_MIN_MM = 100          # /api/detect form bound (ge, inclusive)
+CAMERA_HEIGHT_MAX_MM = 5000         # /api/detect form bound (le, inclusive)
 FOV_HORIZONTAL_DEG = 69.4           # Intel RealSense D415 horizontal FOV
 SIZE_SMALL_MAX_MM = 80.0            # < 8 cm = small
 SIZE_MEDIUM_MAX_MM = 130.0          # 8-13 cm = medium; >= large

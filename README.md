@@ -310,7 +310,7 @@ Multipart form fields:
 | Field | Type | Default | Bounds |
 | --- | --- | --- | --- |
 | `file` | file | _required_ | JPG or PNG |
-| `camera_height_mm` | float | `1000` | `100 < x < 5000` |
+| `camera_height_mm` | float | `1000` | `100 ≤ x ≤ 5000` |
 | `conf_threshold` | float | `0.40` | `0.10`–`0.95` |
 | `aspect_ratio_filter` | bool | `true` | - |
 

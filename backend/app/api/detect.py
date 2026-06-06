@@ -136,10 +136,10 @@ def get_uploader() -> ImageUploader:
 def get_size_estimator(
     camera_height_mm: float = Form(
         default=config.DEFAULT_CAMERA_HEIGHT_MM,
-        gt=config.CAMERA_HEIGHT_MIN_MM,
-        lt=config.CAMERA_HEIGHT_MAX_MM,
+        ge=config.CAMERA_HEIGHT_MIN_MM,
+        le=config.CAMERA_HEIGHT_MAX_MM,
         description="Camera height above the ground in mm (default 1000 mm = "
-                    "1 metre). Must be between 100 and 5000 mm.",
+                    "1 metre). Must be between 100 and 5000 mm (inclusive).",
     ),
 ) -> SizeEstimator:
     """Provide a SizeEstimator configured with the request's camera height.
