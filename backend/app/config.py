@@ -17,6 +17,45 @@ their own modules - they are code, not configuration.
 import os
 from pathlib import Path
 
+
+# --- Env parsing helpers -------------------------------------------------
+# The numeric settings below are read from the environment at import time. A
+# bad value (e.g. UPLOAD_TTL_SECONDS=ten) would otherwise crash the whole app
+# on startup with a bare "invalid literal for int()" that never says WHICH
+# variable is wrong. These helpers turn that into a clear, actionable error
+# that names the variable and shows the offending value. An unset variable
+# falls back to the default, which is a real int/float literal (not a string),
+# so the trusted default is never itself re-parsed.
+
+
+def _get_int_env(name: str, default: int) -> int:
+    """Read an integer env var, with a clear error if it isn't a valid int."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"Environment variable {name} must be a whole number, "
+            f"but got {raw!r}."
+        ) from None
+
+
+def _get_float_env(name: str, default: float) -> float:
+    """Read a float env var, with a clear error if it isn't a valid number."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(
+            f"Environment variable {name} must be a number, "
+            f"but got {raw!r}."
+        ) from None
+
+
 # --- Paths ---------------------------------------------------------------
 # config.py lives in app/, so parent.parent is the backend/ root. This is the
 # single source of truth for these paths (they used to be derived separately,
@@ -44,8 +83,8 @@ CORS_ALLOW_ORIGINS = [
 ]
 
 # --- Uploads: retention + size limits ------------------------------------
-UPLOAD_TTL_SECONDS = int(os.getenv("UPLOAD_TTL_SECONDS", "3600"))      # 60 min
-UPLOAD_SWEEP_SECONDS = int(os.getenv("UPLOAD_SWEEP_SECONDS", "600"))   # 10 min
+UPLOAD_TTL_SECONDS = _get_int_env("UPLOAD_TTL_SECONDS", 3600)          # 60 min
+UPLOAD_SWEEP_SECONDS = _get_int_env("UPLOAD_SWEEP_SECONDS", 600)       # 10 min
 MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024   # 15 MB (whole request body)
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024      # 10 MB (uploaded file)
 MAX_IMAGE_PIXELS = 25_000_000               # ~25 MP (decompression-bomb cap)
@@ -58,8 +97,8 @@ ALLOW_MISSING_WEIGHTS = os.getenv("ALLOW_MISSING_WEIGHTS", "").lower() in (
 )
 
 # --- Rate limiting (per client IP) ---------------------------------------
-RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "10"))
-RATE_LIMIT_WINDOW_SECONDS = float(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_MAX = _get_int_env("RATE_LIMIT_MAX", 10)
+RATE_LIMIT_WINDOW_SECONDS = _get_float_env("RATE_LIMIT_WINDOW_SECONDS", 60.0)
 
 # --- Detection tunables --------------------------------------------------
 # One confidence default everywhere; the floor matches the frontend slider.
