@@ -119,7 +119,7 @@ describe('App settings clamp-on-load', () => {
     renderAppAt('/upload');
 
     expect(screen.getByText('5000 mm')).toBeInTheDocument();
-    expect(screen.getByText('90%')).toBeInTheDocument();
+    expect(screen.getByText('95%')).toBeInTheDocument();
   });
 });
 

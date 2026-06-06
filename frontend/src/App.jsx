@@ -75,7 +75,7 @@ export default function App() {
   // Detection sensitivity (higher = stricter, fewer false positives).
   const [confThreshold, setConfThreshold] = useState(() => {
     try {
-      return clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.90, 0.40);
+      return clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.95, 0.40);
     } catch {
       return 0.40;
     }

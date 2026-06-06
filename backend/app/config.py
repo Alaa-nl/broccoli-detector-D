@@ -65,7 +65,7 @@ RATE_LIMIT_WINDOW_SECONDS = float(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 # One confidence default everywhere; the floor matches the frontend slider.
 DEFAULT_CONF = 0.40            # detector + /api/detect form default
 CONF_MIN = 0.10                # /api/detect form floor (ge); matches the slider
-CONF_MAX = 0.95                # /api/detect form ceiling (le)
+CONF_MAX = 0.95                # /api/detect form ceiling (le); matches the slider
 ASPECT_MAX_RATIO = 1.6         # leaf filter: drop boxes more elongated than this
 
 # --- Size estimation -----------------------------------------------------

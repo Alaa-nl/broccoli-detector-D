@@ -176,7 +176,7 @@ export default function Settings({
           <input
             type="range"
             min={0.10}
-            max={0.90}
+            max={0.95}
             step={0.05}
             value={confThreshold}
             onChange={(e) => setConfThreshold(parseFloat(e.target.value))}
@@ -185,7 +185,7 @@ export default function Settings({
           <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
             <span>10% (more boxes)</span>
             <span>Default: 40%</span>
-            <span>90% (stricter)</span>
+            <span>95% (stricter)</span>
           </div>
         </div>
       </section>
