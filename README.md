@@ -223,7 +223,7 @@ Environment-overridable variables are documented in
 | `UPLOAD_TTL_SECONDS` | `3600` | Delete saved images older than this. |
 | `UPLOAD_SWEEP_SECONDS` | `600` | How often the retention sweep runs. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
-| `EXPECTED_WEIGHTS_SHA256` | _(unset)_ | If set, `best.pt` is hashed and must match before load. |
+| `EXPECTED_WEIGHTS_SHA256` | _(unset)_ | SHA-256 that `best.pt` is checked against before load. Optional in dev; **required when `DEPLOY_ENV=production`** (the server refuses to start without it). |
 | `ALLOW_MISSING_WEIGHTS` | _(unset)_ | `1` lets the server start without `best.pt` (frontend dev). |
 
 Non-environment tunables (request/file size caps, confidence defaults and
@@ -270,9 +270,10 @@ bounds, camera-height bounds, FOV, size-category thresholds) also live in
 - **Layered upload defence:** request-body cap (`413`), streamed file-size cap,
   decompression-bomb pixel cap, real-image decode check, and a saved filename
   derived from the *decoded* format (never the user-supplied name).
-- **Weights integrity check.** If `EXPECTED_WEIGHTS_SHA256` is set, `best.pt` is
+- **Weights integrity check.** When `EXPECTED_WEIGHTS_SHA256` is set, `best.pt` is
   hashed and compared *before* `torch.load` unpickles it, rejecting a tampered
-  checkpoint.
+  checkpoint. Optional in dev, but **required in production** — a production
+  server refuses to start when the hash is not configured.
 - **CORS allowlist**, credentials off, methods/headers narrowed.
 - **Security headers + gzip + long-cache for fingerprinted assets** at the nginx
   layer (CSP, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`).
@@ -449,8 +450,9 @@ future maintainer needs to know:
   (`BACKEND_HOST`); if the backend is renamed/recreated, update those values or
   the frontend will proxy to a dead host (502).
 - **`DEPLOY_ENV=production`** hides the API docs.
-- **`EXPECTED_WEIGHTS_SHA256`** is set so a tampered checkpoint is rejected.
-  Update it whenever the model is retrained.
+- **`EXPECTED_WEIGHTS_SHA256`** is set so a tampered checkpoint is rejected; it is
+  **required in production**, so the backend refuses to start without it. Update it
+  whenever the model is retrained.
 - **Free tier caveat.** YOLO inference needs more CPU than Render's free/starter
   tiers comfortably provide; for an interactive demo, run locally with
   `docker compose up`. The single Uvicorn process is intentional - see the
