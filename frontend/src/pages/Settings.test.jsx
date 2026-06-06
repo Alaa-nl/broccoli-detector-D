@@ -143,3 +143,38 @@ describe('Settings camera-height input', () => {
     expect(setCameraHeight).not.toHaveBeenCalled();
   });
 });
+
+describe('Settings toggle switches (a11y)', () => {
+  beforeEach(() => {
+    // Health fetch never resolves; we only exercise the toggles here.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+  });
+
+  it('exposes the dark-mode toggle as a switch reflecting its state', () => {
+    const { rerender } = render(<Settings {...baseProps} darkMode={false} />);
+
+    expect(
+      screen.getByRole('switch', { name: /dark mode/i }),
+    ).toHaveAttribute('aria-checked', 'false');
+
+    rerender(<Settings {...baseProps} darkMode={true} />);
+    expect(
+      screen.getByRole('switch', { name: /dark mode/i }),
+    ).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('exposes the leaf-filter toggle as a switch reflecting its state', () => {
+    const { rerender } = render(
+      <Settings {...baseProps} aspectRatioFilter={true} />,
+    );
+
+    expect(
+      screen.getByRole('switch', { name: /leaf filter/i }),
+    ).toHaveAttribute('aria-checked', 'true');
+
+    rerender(<Settings {...baseProps} aspectRatioFilter={false} />);
+    expect(
+      screen.getByRole('switch', { name: /leaf filter/i }),
+    ).toHaveAttribute('aria-checked', 'false');
+  });
+});

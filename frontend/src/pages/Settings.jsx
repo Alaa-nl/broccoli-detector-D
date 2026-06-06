@@ -129,6 +129,8 @@ export default function Settings({
           {/* Simple toggle switch. */}
           <button
             onClick={() => setDarkMode(!darkMode)}
+            role="switch"
+            aria-checked={darkMode}
             aria-label="Toggle dark mode"
             className={`relative w-12 h-7 rounded-full transition-colors ${
               darkMode ? 'bg-broccoli-600' : 'bg-gray-300'
@@ -230,6 +232,8 @@ export default function Settings({
           </div>
           <button
             onClick={() => setAspectRatioFilter(!aspectRatioFilter)}
+            role="switch"
+            aria-checked={aspectRatioFilter}
             aria-label="Toggle leaf filter"
             className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ml-3 ${
               aspectRatioFilter ? 'bg-broccoli-600' : 'bg-gray-300'
