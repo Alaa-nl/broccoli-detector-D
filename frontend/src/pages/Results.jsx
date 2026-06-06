@@ -51,6 +51,16 @@ export default function Results({ detection }) {
     ? crowns.reduce((sum, c) => sum + (c.diameter_cm ?? 0), 0) / crowns.length
     : 0;
 
+  // When nothing is found AND strictness was raised above the default (0.40),
+  // the high confidence threshold is the most likely reason - so point the user
+  // to Settings. (A tester hit exactly this: at 90% strictness some photos
+  // returned no crowns even though the page loaded fine.)
+  const confThreshold = detection.conf_threshold;
+  const strictnessMayHideCrowns =
+    crowns.length === 0 &&
+    Number.isFinite(confThreshold) &&
+    confThreshold > 0.4;
+
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
@@ -127,10 +137,25 @@ export default function Results({ detection }) {
         </h2>
 
         {crowns.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            The model did not find any crowns in this image. Try another
-            photo, or check that the crown is clearly visible.
-          </p>
+          <div className="text-sm text-gray-500 dark:text-gray-400 space-y-2">
+            <p>
+              The model did not find any crowns in this image. Try another
+              photo, or check that the crown is clearly visible.
+            </p>
+            {strictnessMayHideCrowns && (
+              <p>
+                Your strictness is set to {(confThreshold * 100).toFixed(0)}% —
+                try lowering it in{' '}
+                <Link
+                  to="/settings"
+                  className="text-broccoli-700 dark:text-broccoli-400 hover:underline"
+                >
+                  Settings
+                </Link>{' '}
+                to surface less-confident crowns.
+              </p>
+            )}
+          </div>
         ) : (
           <ul className="space-y-2">
             {crowns.map((crown) => (

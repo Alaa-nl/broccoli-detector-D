@@ -134,3 +134,59 @@ describe('Results crown-row keyboard access', () => {
     expect(screen.getByText(/Bounding box: \(/i)).toBeInTheDocument();
   });
 });
+
+describe('Results empty-state strictness hint', () => {
+  // A valid payload that simply found nothing.
+  const noCrowns = {
+    num_crowns: 0,
+    num_filtered: 0,
+    aspect_ratio_filter: true,
+    camera_height_mm: 1000,
+    inference_time_ms: 30,
+    image_width: 320,
+    image_height: 240,
+    annotated_url: '/uploads/x_annotated.png',
+    crowns: [],
+  };
+
+  it('hints to lower strictness when none found and strictness is high', () => {
+    renderResults({ ...noCrowns, conf_threshold: 0.9 });
+
+    expect(screen.getByText(/did not find any crowns/i)).toBeInTheDocument();
+    // The hint names the current strictness and links to Settings.
+    expect(
+      screen.getByText(/your strictness is set to 90%/i),
+    ).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /settings/i });
+    expect(link).toHaveAttribute('href', '/settings');
+  });
+
+  it('does not hint when strictness is at the default', () => {
+    renderResults({ ...noCrowns, conf_threshold: 0.4 });
+
+    expect(screen.getByText(/did not find any crowns/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/your strictness is set to/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /settings/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not hint when the threshold is missing', () => {
+    renderResults({ ...noCrowns, conf_threshold: undefined });
+
+    expect(screen.getByText(/did not find any crowns/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/your strictness is set to/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not show the hint when crowns are present, even at high strictness', () => {
+    renderResults({ ...oneCrown, conf_threshold: 0.9 });
+
+    expect(
+      screen.queryByText(/your strictness is set to/i),
+    ).not.toBeInTheDocument();
+  });
+});
