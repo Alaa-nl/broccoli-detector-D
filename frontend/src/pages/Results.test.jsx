@@ -1,7 +1,7 @@
 // Tests for Results' defensive rendering: a malformed detection payload
 // (missing crowns, missing scalars) must render without throwing.
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Results from './Results.jsx';
@@ -65,6 +65,34 @@ describe('Results defensive rendering', () => {
     // The crown id still renders; missing numbers degrade to '-'.
     expect(screen.getByText('7')).toBeInTheDocument();
     expect(screen.getByText(/- cm/)).toBeInTheDocument();
+  });
+});
+
+describe('Results annotated image error handling', () => {
+  it('shows the annotated image when it loads normally', () => {
+    renderResults(oneCrown);
+    expect(screen.getByAltText(/detection result/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/annotated image unavailable/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('swaps in a fallback message when the annotated image 404s', () => {
+    renderResults(oneCrown);
+
+    // jsdom never actually fetches the src, so fire the error event the
+    // browser would raise once the file has expired (TTL) or the server
+    // restarted.
+    fireEvent.error(screen.getByAltText(/detection result/i));
+
+    expect(
+      screen.getByText(/annotated image unavailable/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/may have expired/i)).toBeInTheDocument();
+    // The broken <img> is replaced rather than left showing a broken icon.
+    expect(screen.queryByAltText(/detection result/i)).not.toBeInTheDocument();
+    // The textual results are unaffected.
+    expect(screen.getByText('Detection Results')).toBeInTheDocument();
   });
 });
 
