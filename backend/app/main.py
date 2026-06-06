@@ -132,7 +132,12 @@ class BodySizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Fast path: trust Content-Length when the client sends it.
+        # Fast path: trust Content-Length when the client sends it. dict()
+        # keeps only the last value if a header name repeats, which is safe
+        # here: HTTP forbids conflicting Content-Length values (a well-behaved
+        # server rejects them upstream), and the streaming byte counter below
+        # is the authoritative guard - so an odd or absent Content-Length only
+        # loses this early reject, never the size limit itself.
         headers = dict(scope.get("headers", []))
         content_length = headers.get(b"content-length")
         if content_length is not None:
