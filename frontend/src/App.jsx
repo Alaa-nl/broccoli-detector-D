@@ -17,6 +17,16 @@ import Settings from './pages/Settings.jsx';
 import About from './pages/About.jsx';
 import { clampNumber } from './utils/number.js';
 
+// Best-effort localStorage write: some privacy modes / locked-down browsers
+// throw on access, so persistence must never crash a render.
+function persistSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage blocked or full — non-fatal, settings just won't persist */
+  }
+}
+
 export default function App() {
   // Used as the error-boundary key below, so navigating to another tab
   // remounts the boundary and clears a crash without a full reload.
@@ -56,15 +66,21 @@ export default function App() {
   // Load saved settings on first render. (darkMode is handled by the lazy
   // initialiser above so it can take effect before paint.)
   useEffect(() => {
-    // Clamp restored values so a corrupt or out-of-range stored setting
-    // (e.g. "NaN", or a height of 999999) can't leak into the UI or a request.
-    const savedHeight = clampNumber(localStorage.getItem('cameraHeight'), 100, 5000, 1000);
-    const savedConf = clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.90, 0.40);
-    const savedArf = localStorage.getItem('aspectRatioFilter');
-    setCameraHeight(savedHeight);
-    setConfThreshold(savedConf);
-    // Default to true if not set yet.
-    setAspectRatioFilter(savedArf === null ? true : savedArf === 'true');
+    // Reading localStorage can throw where storage is blocked/disabled (some
+    // privacy modes, locked-down browsers); fall back to the state defaults
+    // instead of crashing on mount. Clamp restored values too so a corrupt or
+    // out-of-range stored setting ("NaN", a height of 999999) can't leak in.
+    try {
+      const savedHeight = clampNumber(localStorage.getItem('cameraHeight'), 100, 5000, 1000);
+      const savedConf = clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.90, 0.40);
+      const savedArf = localStorage.getItem('aspectRatioFilter');
+      setCameraHeight(savedHeight);
+      setConfThreshold(savedConf);
+      // Default to true if not set yet.
+      setAspectRatioFilter(savedArf === null ? true : savedArf === 'true');
+    } catch {
+      /* storage unavailable — keep the in-memory defaults */
+    }
   }, []);
 
   // Apply / remove the dark class on the <html> element
@@ -75,19 +91,19 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('darkMode', String(darkMode));
+    persistSetting('darkMode', String(darkMode));
   }, [darkMode]);
 
   useEffect(() => {
-    localStorage.setItem('cameraHeight', String(cameraHeight));
+    persistSetting('cameraHeight', String(cameraHeight));
   }, [cameraHeight]);
 
   useEffect(() => {
-    localStorage.setItem('confThreshold', String(confThreshold));
+    persistSetting('confThreshold', String(confThreshold));
   }, [confThreshold]);
 
   useEffect(() => {
-    localStorage.setItem('aspectRatioFilter', String(aspectRatioFilter));
+    persistSetting('aspectRatioFilter', String(aspectRatioFilter));
   }, [aspectRatioFilter]);
 
   // Persist the latest detection so the Results page survives a reload.

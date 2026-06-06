@@ -145,3 +145,27 @@ describe('App dark-mode (no FOUC)', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 });
+
+describe('App resilience to blocked storage', () => {
+  it('mounts without crashing when localStorage access throws', () => {
+    // Some privacy modes / locked-down browsers throw on any storage access.
+    const getSpy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('SecurityError: storage is disabled');
+      });
+    const setSpy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('SecurityError: storage is disabled');
+      });
+
+    renderAppAt('/');
+
+    // The app shell still renders instead of blanking out on mount.
+    expect(screen.getByText('Welcome to BroccoliDetect')).toBeInTheDocument();
+
+    getSpy.mockRestore();
+    setSpy.mockRestore();
+  });
+});
