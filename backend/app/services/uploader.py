@@ -103,7 +103,10 @@ class ImageUploader:
             if total > self.MAX_FILE_SIZE_BYTES:
                 raise HTTPException(
                     status_code=413,
-                    detail="File is too large. The maximum size is 10 MB.",
+                    detail=(
+                        "File is too large. The maximum size is "
+                        f"{self.MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
+                    ),
                 )
             chunks.append(chunk)
         content = b"".join(chunks)
