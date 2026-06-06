@@ -157,3 +157,21 @@ describe('Upload object URL lifecycle', () => {
     expect(revokeSpy).toHaveBeenCalledWith('blob:url-1');
   });
 });
+
+describe('Upload error announcement (a11y)', () => {
+  it('surfaces the error inside a role="alert" live region', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', hangingFetch());
+
+    const { container } = renderUpload();
+    await user.upload(container.querySelector('input[type="file"]'), pngFile());
+    await user.click(screen.getByRole('button', { name: /detect broccoli/i }));
+
+    // Cancelling sets an error; it must land in an alert region so a screen
+    // reader announces it instead of leaving the user with no feedback.
+    await user.click(await screen.findByRole('button', { name: /cancel/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/detection cancelled/i);
+  });
+});

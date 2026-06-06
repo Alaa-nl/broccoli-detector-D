@@ -208,10 +208,18 @@ export default function Upload({
         </ul>
       </div>
 
-      {/* Error message. */}
+      {/* Error message. role="alert" is an assertive aria-live region, so a
+          screen reader announces the message the moment it appears - without
+          it, a dynamically inserted error is silent to non-sighted users. */}
       {error && (
-        <div className="card p-4 bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+        <div
+          role="alert"
+          className="card p-4 bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 flex items-start gap-3"
+        >
+          <AlertCircle
+            className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5"
+            aria-hidden="true"
+          />
           <div className="text-sm text-red-700 dark:text-red-300">{error}</div>
         </div>
       )}
