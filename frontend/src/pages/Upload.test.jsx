@@ -232,3 +232,54 @@ describe('Upload drop-zone type preview (dragover)', () => {
     expect(zone).not.toHaveClass('border-broccoli-500');
   });
 });
+
+describe('Upload file drop (handleDrop)', () => {
+  const dropZone = () => screen.getByLabelText(/drag & drop/i).closest('label');
+
+  it('accepts a valid image dropped on the zone and shows its preview', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    fireEvent.drop(zone, { dataTransfer: { files: [pngFile('field.png')] } });
+
+    // pickFile accepted it: preview + filename render and Detect is enabled.
+    expect(screen.getByAltText(/preview/i)).toBeInTheDocument();
+    expect(screen.getByText('field.png')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /detect broccoli/i }),
+    ).toBeEnabled();
+  });
+
+  it('rejects a dropped file of the wrong type with an error', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    const pdf = new File([new Uint8Array([1, 2, 3])], 'doc.pdf', {
+      type: 'application/pdf',
+    });
+    fireEvent.drop(zone, { dataTransfer: { files: [pdf] } });
+
+    // pickFile rejected it: an alert shows, no preview, Detect stays disabled.
+    expect(screen.getByRole('alert')).toHaveTextContent(/jpg or png/i);
+    expect(screen.queryByAltText(/preview/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /detect broccoli/i }),
+    ).toBeDisabled();
+  });
+
+  it('clears the active drag state after a drop', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    // Drag a valid image over (active state), then drop it.
+    fireEvent.dragOver(zone, {
+      dataTransfer: { items: [{ kind: 'file', type: 'image/png' }] },
+    });
+    expect(zone).toHaveClass('border-broccoli-500');
+
+    fireEvent.drop(zone, { dataTransfer: { files: [pngFile()] } });
+
+    // handleDrop resets dragState, so the active border is gone.
+    expect(zone).not.toHaveClass('border-broccoli-500');
+  });
+});
