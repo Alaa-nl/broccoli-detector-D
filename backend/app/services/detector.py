@@ -94,9 +94,11 @@ class BroccoliDetector:
     def _verify_integrity(self) -> None:
         """Check the weights file hash against the expected value.
 
-        - No expected hash configured: skip the check (print a warning) and
-          let the file load as before. This keeps local dev and existing
-          deployments working without extra configuration.
+        - No expected hash configured: behaviour depends on the environment.
+          In production (DEPLOY_ENV=production) this is a fatal misconfig and
+          raises, so a prod server never loads weights unverified ("fail
+          closed"). In dev it logs a warning and skips the check, keeping the
+          local flow working without extra configuration.
         - Expected hash configured and matches: return quietly; the caller
           proceeds to load the model.
         - Expected hash configured and does NOT match: raise RuntimeError so
@@ -105,10 +107,22 @@ class BroccoliDetector:
           (that flag only covers a genuinely missing file for frontend dev).
 
         Raises:
-            RuntimeError: If an expected hash is set and the file's hash
+            RuntimeError: If running in production with no expected hash
+                configured, or if an expected hash is set and the file's hash
                 does not match it.
         """
         if not self.expected_sha256:
+            # The hash check is what lets us reject a tampered checkpoint
+            # before torch.load unpickles (and therefore executes) it. Silently
+            # skipping it in production would be "fail-open", so we refuse to
+            # start there; local dev stays optional (warn and continue).
+            if config.IS_PROD:
+                raise RuntimeError(
+                    "EXPECTED_WEIGHTS_SHA256 is not set but DEPLOY_ENV=production. "
+                    "Refusing to load weights unverified in production; set "
+                    "EXPECTED_WEIGHTS_SHA256 to the known-good SHA-256 of best.pt "
+                    "(or run with DEPLOY_ENV=dev for local development)."
+                )
             logger.warning(
                 "Weights integrity verification is DISABLED "
                 "(EXPECTED_WEIGHTS_SHA256 not set). Set it to the known-good "
