@@ -57,31 +57,38 @@ export default function App() {
       return false;
     }
   });
-  const [cameraHeight, setCameraHeight] = useState(1000);
-  // Detection sensitivity (higher = stricter, fewer false positives).
-  const [confThreshold, setConfThreshold] = useState(0.40);
-  // Drop boxes that are too elongated (probably leaves, not crowns).
-  const [aspectRatioFilter, setAspectRatioFilter] = useState(true);
-
-  // Load saved settings on first render. (darkMode is handled by the lazy
-  // initialiser above so it can take effect before paint.)
-  useEffect(() => {
-    // Reading localStorage can throw where storage is blocked/disabled (some
-    // privacy modes, locked-down browsers); fall back to the state defaults
-    // instead of crashing on mount. Clamp restored values too so a corrupt or
-    // out-of-range stored setting ("NaN", a height of 999999) can't leak in.
+  // The three settings below are lazy-initialised straight from localStorage
+  // (like darkMode above), so the first render already holds the saved values.
+  // This removes a mount-time race: previously the per-setting "save" effects
+  // ran with the default values - before a load effect could apply the stored
+  // ones - and briefly overwrote the saved values with the defaults. Each
+  // reader is wrapped in try/catch (storage can throw in locked-down/private
+  // browsers) and clamped, so a blocked, corrupt, or out-of-range value falls
+  // back to a safe default instead of crashing or leaking in.
+  const [cameraHeight, setCameraHeight] = useState(() => {
     try {
-      const savedHeight = clampNumber(localStorage.getItem('cameraHeight'), 100, 5000, 1000);
-      const savedConf = clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.90, 0.40);
-      const savedArf = localStorage.getItem('aspectRatioFilter');
-      setCameraHeight(savedHeight);
-      setConfThreshold(savedConf);
-      // Default to true if not set yet.
-      setAspectRatioFilter(savedArf === null ? true : savedArf === 'true');
+      return clampNumber(localStorage.getItem('cameraHeight'), 100, 5000, 1000);
     } catch {
-      /* storage unavailable — keep the in-memory defaults */
+      return 1000;
     }
-  }, []);
+  });
+  // Detection sensitivity (higher = stricter, fewer false positives).
+  const [confThreshold, setConfThreshold] = useState(() => {
+    try {
+      return clampNumber(localStorage.getItem('confThreshold'), 0.10, 0.90, 0.40);
+    } catch {
+      return 0.40;
+    }
+  });
+  // Drop boxes that are too elongated (probably leaves, not crowns).
+  const [aspectRatioFilter, setAspectRatioFilter] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aspectRatioFilter');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
 
   // Apply / remove the dark class on the <html> element
   // whenever darkMode changes. Tailwind reads this class.
