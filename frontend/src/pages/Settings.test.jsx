@@ -103,4 +103,43 @@ describe('Settings camera-height input', () => {
 
     expect(setCameraHeight).toHaveBeenCalledWith(5000);
   });
+
+  it('commits a typed-but-un-blurred height when the page unmounts', async () => {
+    // Mimics navigating away (e.g. browser back) without blurring the field:
+    // the value must still reach the parent so Upload uses the latest height.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const setCameraHeight = vi.fn();
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <Settings {...baseProps} setCameraHeight={setCameraHeight} />,
+    );
+
+    const input = screen.getByLabelText(/camera height/i);
+    await user.clear(input);
+    await user.type(input, '1500'); // no blur / Enter
+    expect(setCameraHeight).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(setCameraHeight).toHaveBeenCalledWith(1500);
+  });
+
+  it('does not commit an out-of-range height on unmount', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const setCameraHeight = vi.fn();
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <Settings {...baseProps} setCameraHeight={setCameraHeight} />,
+    );
+
+    const input = screen.getByLabelText(/camera height/i);
+    await user.clear(input);
+    await user.type(input, '50'); // below the 100 mm floor
+
+    unmount();
+
+    expect(setCameraHeight).not.toHaveBeenCalled();
+  });
 });

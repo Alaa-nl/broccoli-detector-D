@@ -2,7 +2,7 @@
 // Lets the user change dark mode, the camera height (for size
 // estimation), and shows information about the loaded model.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
 import { getHealth } from '../api/client';
 import { MODEL_INFO } from '../constants/model.js';
@@ -10,6 +10,12 @@ import { MODEL_INFO } from '../constants/model.js';
 // Give up on the health check after this long so it can't sit on
 // "checking..." forever if the backend never answers.
 const HEALTH_TIMEOUT_MS = 10000;
+
+// Camera height is valid when it's a finite number within the inclusive
+// [100, 5000] mm range - matching the input's min/max, the clamp helper, and
+// the load path, so the boundary values can actually be entered.
+const isValidHeight = (value) =>
+  Number.isFinite(value) && value >= 100 && value <= 5000;
 
 export default function Settings({
   darkMode,
@@ -24,6 +30,10 @@ export default function Settings({
   // Local state for the camera height input.
   // We commit it to the parent only when the user finishes typing.
   const [heightInput, setHeightInput] = useState(String(cameraHeight));
+  // Mirror the latest typed value into a ref so the unmount safety-net below
+  // can read it without re-subscribing an effect on every keystroke.
+  const heightInputRef = useRef(heightInput);
+  heightInputRef.current = heightInput;
 
   // Health info from the backend.
   const [health, setHealth] = useState(null);
@@ -58,15 +68,27 @@ export default function Settings({
 
   function commitHeight() {
     const value = parseFloat(heightInput);
-    // Inclusive bounds [100, 5000] to match the clamp helper, the load path,
-    // and the input's min/max - so the boundary values can actually be entered.
-    if (Number.isFinite(value) && value >= 100 && value <= 5000) {
+    if (isValidHeight(value)) {
       setCameraHeight(value);
     } else {
       // Reset to the saved value if the input was bad.
       setHeightInput(String(cameraHeight));
     }
   }
+
+  // Safety net: commitHeight normally runs on blur or Enter, but some
+  // navigations unmount this page without firing blur first - e.g. the browser
+  // back/forward button, or any programmatic route change. Commit a still-valid
+  // typed value on unmount too, so Upload always uses the latest height the
+  // user entered rather than the last-committed one.
+  useEffect(() => {
+    return () => {
+      const value = parseFloat(heightInputRef.current);
+      if (isValidHeight(value)) {
+        setCameraHeight(value);
+      }
+    };
+  }, [setCameraHeight]);
 
   function resetDefaults() {
     setDarkMode(false);
