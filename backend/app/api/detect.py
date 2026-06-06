@@ -8,6 +8,7 @@ This route ties together all the services:
   4. Annotator - draws boxes on the result image
 """
 
+import ipaddress
 import logging
 import os
 import random
@@ -73,18 +74,38 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
         )
 
 
+def _normalise_ip(value: str) -> Optional[str]:
+    """Return the canonical form of `value` if it is a valid IP, else None.
+
+    Canonicalising (via ipaddress) means equivalent spellings of the same
+    address - e.g. the IPv6 forms "::1" and "0:0:0:0:0:0:0:1" - collapse to
+    one limiter key instead of counting as two distinct clients.
+    """
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
 def _client_key(request: Request) -> str:
     """Best-effort client identity for rate limiting.
 
-    Behind nginx the real client IP arrives in X-Forwarded-For /
-    X-Real-IP (set by the proxy); fall back to the socket peer otherwise.
+    Behind nginx the real client IP arrives in X-Forwarded-For / X-Real-IP
+    (set by the proxy). Those headers are client-settable, though, so we only
+    use a value once it actually parses as an IP address - otherwise a caller
+    could send arbitrary (or constantly rotating) strings to dodge the limit
+    or balloon the limiter's key set. When no header carries a valid IP we
+    fall back to the socket peer, which the client cannot spoof.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
+    for header_name in ("x-forwarded-for", "x-real-ip"):
+        header_value = request.headers.get(header_name)
+        if not header_value:
+            continue
+        # X-Forwarded-For may be a comma-separated chain; the first entry is
+        # the originating client.
+        candidate = _normalise_ip(header_value.split(",")[0].strip())
+        if candidate is not None:
+            return candidate
     return request.client.host if request.client else "unknown"
 
 
