@@ -219,8 +219,9 @@ class BroccoliDetector:
             # Measure how long inference takes (for the demo UI). The
             # timer starts after the lock is held, so this reports pure
             # model time and excludes any time spent waiting for another
-            # request's inference to finish.
-            start_time = time.time()
+            # request's inference to finish. Use monotonic() (not time()) so a
+            # system-clock change mid-inference can't skew - or negate - it.
+            start_time = time.monotonic()
 
             # Run the model. We pass conf to filter out low-confidence
             # boxes and verbose=False to keep the terminal clean.
@@ -230,7 +231,7 @@ class BroccoliDetector:
                 verbose=False,
             )
 
-            inference_time_ms = (time.time() - start_time) * 1000
+            inference_time_ms = (time.monotonic() - start_time) * 1000
 
             # Extract bounding boxes from the YOLO result object.
             detections = []
