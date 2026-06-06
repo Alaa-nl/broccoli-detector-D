@@ -27,7 +27,10 @@ export default function Upload({
   const [previewUrl, setPreviewUrl] = useState(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
+  // null = not dragging; 'valid' = dragging an acceptable file; 'invalid' =
+  // dragging a file we can already tell is the wrong type (previewed from the
+  // drag's MIME type, before the drop).
+  const [dragState, setDragState] = useState(null);
 
   // Holds the in-flight request's controller so Cancel (and the timeout
   // watchdog) can abort it. Null when no request is running.
@@ -64,9 +67,31 @@ export default function Upload({
   }
 
   // Drag-and-drop handlers.
+
+  // During dragover the browser hides the file's name and bytes for privacy,
+  // but it DOES expose the MIME type via dataTransfer.items - enough to preview
+  // whether the file will be accepted. Return 'invalid' only when the type is
+  // positively known and unsupported; an empty/unknown type stays 'valid', so a
+  // good file is never rejected on a guess (handleDrop/pickFile still run the
+  // real validation). Only the first item is previewed, like the drop handler.
+  function dragStateFor(e) {
+    const items = e.dataTransfer?.items;
+    if (items && items.length > 0) {
+      const first = items[0];
+      if (
+        first.kind === 'file' &&
+        first.type &&
+        !ALLOWED_TYPES.includes(first.type)
+      ) {
+        return 'invalid';
+      }
+    }
+    return 'valid';
+  }
+
   function handleDrop(e) {
     e.preventDefault();
-    setIsDragging(false);
+    setDragState(null);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       pickFile(e.dataTransfer.files[0]);
     }
@@ -140,11 +165,13 @@ export default function Upload({
           and keyboard focus (Tab to the input, Enter/Space to open the
           picker) all work natively. */}
       <label
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
+        onDragOver={(e) => { e.preventDefault(); setDragState(dragStateFor(e)); }}
+        onDragLeave={() => setDragState(null)}
         onDrop={handleDrop}
         className={`card p-8 text-center cursor-pointer border-2 border-dashed transition-colors block focus-within:ring-2 focus-within:ring-broccoli-500 ${
-          isDragging
+          dragState === 'invalid'
+            ? 'border-red-500 bg-red-50 dark:bg-red-900/30'
+            : dragState === 'valid'
             ? 'border-broccoli-500 bg-broccoli-50 dark:bg-gray-700'
             : 'border-gray-300 dark:border-gray-600 hover:border-broccoli-400'
         }`}
@@ -165,10 +192,20 @@ export default function Upload({
         ) : (
           // Show the empty drop zone.
           <div className="space-y-3">
-            <UploadCloud className="w-12 h-12 mx-auto text-gray-400" />
-            <div className="font-semibold text-lg">Drag & Drop Image Here</div>
+            <UploadCloud
+              className={`w-12 h-12 mx-auto ${
+                dragState === 'invalid' ? 'text-red-500' : 'text-gray-400'
+              }`}
+            />
+            <div className="font-semibold text-lg">
+              {dragState === 'invalid'
+                ? 'Unsupported file type'
+                : 'Drag & Drop Image Here'}
+            </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              or click to browse files
+              {dragState === 'invalid'
+                ? 'Please use a JPG or PNG image.'
+                : 'or click to browse files'}
             </div>
             <div className="flex gap-2 justify-center text-xs">
               {ALLOWED_TYPES.map((type) => (

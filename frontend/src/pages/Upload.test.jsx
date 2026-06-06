@@ -175,3 +175,60 @@ describe('Upload error announcement (a11y)', () => {
     expect(alert).toHaveTextContent(/detection cancelled/i);
   });
 });
+
+describe('Upload drop-zone type preview (dragover)', () => {
+  const dropZone = () => screen.getByLabelText(/drag & drop/i).closest('label');
+
+  it('flags an unsupported type as rejected during dragover', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    fireEvent.dragOver(zone, {
+      dataTransfer: { items: [{ kind: 'file', type: 'application/pdf' }] },
+    });
+
+    expect(zone).toHaveClass('border-red-500');
+    expect(zone).not.toHaveClass('border-broccoli-500');
+    // Not conveyed by colour alone - there's a text cue too.
+    expect(screen.getByText(/unsupported file type/i)).toBeInTheDocument();
+  });
+
+  it('shows the normal active state for a supported image', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    fireEvent.dragOver(zone, {
+      dataTransfer: { items: [{ kind: 'file', type: 'image/png' }] },
+    });
+
+    expect(zone).toHaveClass('border-broccoli-500');
+    expect(zone).not.toHaveClass('border-red-500');
+  });
+
+  it('does not reject when the dragged type is unknown (empty)', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    // Some OS/app drag sources expose no MIME type; never reject on a guess.
+    fireEvent.dragOver(zone, {
+      dataTransfer: { items: [{ kind: 'file', type: '' }] },
+    });
+
+    expect(zone).toHaveClass('border-broccoli-500');
+    expect(zone).not.toHaveClass('border-red-500');
+  });
+
+  it('clears the drag state on drag leave', () => {
+    renderUpload();
+    const zone = dropZone();
+
+    fireEvent.dragOver(zone, {
+      dataTransfer: { items: [{ kind: 'file', type: 'image/png' }] },
+    });
+    expect(zone).toHaveClass('border-broccoli-500');
+
+    fireEvent.dragLeave(zone);
+    expect(zone).toHaveClass('border-gray-300');
+    expect(zone).not.toHaveClass('border-broccoli-500');
+  });
+});
