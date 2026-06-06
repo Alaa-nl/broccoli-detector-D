@@ -104,6 +104,47 @@ describe('Settings camera-height input', () => {
     expect(setCameraHeight).toHaveBeenCalledWith(5000);
   });
 
+  it('accepts the lower boundary value 100 instead of reverting it', async () => {
+    // Regression test for finding #2 (the >100 vs >=100 bound): exactly 100 mm
+    // is in range and must be committed, not snapped back.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const setCameraHeight = vi.fn();
+    const user = userEvent.setup();
+
+    render(<Settings {...baseProps} setCameraHeight={setCameraHeight} />);
+
+    const input = screen.getByLabelText(/camera height/i);
+    await user.clear(input);
+    await user.type(input, '100');
+    await user.tab(); // blur -> commitHeight
+
+    expect(setCameraHeight).toHaveBeenCalledWith(100);
+  });
+
+  it('reverts an out-of-range value to the saved height on blur', async () => {
+    // The reject branch: a value outside [100, 5000] is not committed; the
+    // field snaps back to the last good value instead.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const setCameraHeight = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <Settings
+        {...baseProps}
+        cameraHeight={1000}
+        setCameraHeight={setCameraHeight}
+      />,
+    );
+
+    const input = screen.getByLabelText(/camera height/i);
+    await user.clear(input);
+    await user.type(input, '99'); // just below the 100 mm floor
+    await user.tab(); // blur -> commitHeight
+
+    expect(setCameraHeight).not.toHaveBeenCalled();
+    expect(input).toHaveValue(1000); // snapped back to the saved value
+  });
+
   it('commits a typed-but-un-blurred height when the page unmounts', async () => {
     // Mimics navigating away (e.g. browser back) without blurring the field:
     // the value must still reach the parent so Upload uses the latest height.
