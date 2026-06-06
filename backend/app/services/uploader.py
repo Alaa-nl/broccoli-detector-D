@@ -96,8 +96,13 @@ class ImageUploader:
         # an oversized upload before the whole body is buffered into
         # memory, instead of reading everything first and checking the
         # size after the fact (which would already have spent the RAM).
+        # Each chunk is written straight into a BytesIO buffer instead of
+        # being collected in a list and joined at the end: that keeps a
+        # single copy in memory (the buffer) rather than the chunk list
+        # plus the joined bytes, and the same buffer is reused by
+        # Image.open() below.
         total = 0
-        chunks = []
+        buffer = BytesIO()
         while chunk := await upload.read(self.READ_CHUNK_BYTES):
             total += len(chunk)
             if total > self.MAX_FILE_SIZE_BYTES:
@@ -108,8 +113,7 @@ class ImageUploader:
                         f"{self.MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
                     ),
                 )
-            chunks.append(chunk)
-        content = b"".join(chunks)
+            buffer.write(chunk)
 
         if total == 0:
             raise HTTPException(
@@ -117,12 +121,16 @@ class ImageUploader:
                 detail="The uploaded file is empty.",
             )
 
+        # Rewind the buffer before reading it: write() above left the cursor
+        # at the end, so without this Image.open() would start at EOF and fail.
+        buffer.seek(0)
+
         # Open the file header to confirm it is a real image and to read
         # its dimensions. Image.open() only parses the header (it does
         # not decode the pixels yet), so this is cheap and safe to do
         # before the pixel cap below.
         try:
-            pil_image = Image.open(BytesIO(content))
+            pil_image = Image.open(buffer)
         except (UnidentifiedImageError, OSError):
             raise HTTPException(
                 status_code=400,
