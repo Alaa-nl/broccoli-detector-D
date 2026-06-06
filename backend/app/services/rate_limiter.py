@@ -9,10 +9,17 @@ multi-process / multi-instance setup would need a shared store (e.g.
 Redis) instead.
 """
 
+import random
 import threading
 import time
 from collections import defaultdict, deque
 from typing import Deque, Dict
+
+
+# Fraction of allow() calls that trigger an opportunistic prune of stale keys.
+# Kept small so the O(keys) scan stays rare; pruning is best-effort, so the
+# exact rate doesn't matter and skipping it is always safe.
+_PRUNE_PROBABILITY = 0.01
 
 
 class RateLimiter:
@@ -55,13 +62,17 @@ class RateLimiter:
             while hits and hits[0] <= cutoff:
                 hits.popleft()
 
-            if len(hits) >= self.max_requests:
-                # Over the limit. If the deque is empty (cannot happen
-                # here, but keep the invariant) we would prune the key.
-                return False
+            allowed = len(hits) < self.max_requests
+            if allowed:
+                hits.append(now)
 
-            hits.append(now)
-            return True
+        # Opportunistically drop fully-expired keys so the limiter bounds its
+        # own memory - callers don't have to reach in and do it. _prune takes
+        # the lock itself, so run it after releasing the block above.
+        if random.random() < _PRUNE_PROBABILITY:
+            self._prune()
+
+        return allowed
 
     def retry_after(self, key: str) -> int:
         """Seconds until the oldest in-window hit for `key` expires.
@@ -80,8 +91,8 @@ class RateLimiter:
     def _prune(self) -> None:
         """Drop keys whose windows are fully expired, to bound memory.
 
-        Called opportunistically; safe to skip. Without this, the dict
-        would keep one (empty) deque per IP ever seen.
+        Internal: called opportunistically from allow(); safe to skip.
+        Without this, the dict would keep one (empty) deque per IP ever seen.
         """
         now = time.monotonic()
         cutoff = now - self.window_seconds

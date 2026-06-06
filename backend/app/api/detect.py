@@ -11,7 +11,6 @@ This route ties together all the services:
 import ipaddress
 import logging
 import os
-import random
 import secrets
 from typing import Optional
 
@@ -118,9 +117,6 @@ def rate_limit(request: Request) -> None:
             detail="Too many requests. Please slow down and try again shortly.",
             headers={"Retry-After": str(_rate_limiter.retry_after(key))},
         )
-    # Occasionally drop stale keys so the limiter's memory stays bounded.
-    if random.random() < 0.01:
-        _rate_limiter._prune()
 
 
 def get_uploader() -> ImageUploader:
