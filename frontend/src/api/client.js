@@ -64,7 +64,21 @@ export function detectImage(formData, { signal } = {}) {
   });
 }
 
-// Fetch the backend health/readiness summary.
-export function getHealth({ signal } = {}) {
-  return request(ENDPOINTS.health, { signal, context: 'health' });
+// Fetch the backend health summary. Unlike detect, /health intentionally
+// returns HTTP 503 (with a JSON body) when the backend is up but the model
+// isn't loaded - that "degraded" body is meaningful, not a failure - so we
+// return the parsed body regardless of the status code. A network error,
+// timeout, or non-JSON body propagates instead, so the caller shows
+// "unreachable". An AbortError is rethrown untouched so an unmount-abort
+// stays silent (matches detect's behaviour).
+export async function getHealth({ signal } = {}) {
+  let response;
+  try {
+    response = await fetch(ENDPOINTS.health, { signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    logDev('health', err);
+    throw err;
+  }
+  return response.json();
 }

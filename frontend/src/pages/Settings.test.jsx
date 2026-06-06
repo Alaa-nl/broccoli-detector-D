@@ -1,6 +1,7 @@
 // Tests for the Settings page's health-check abort behaviour.
 
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import Settings from './Settings.jsx';
 import { MODEL_INFO } from '../constants/model.js';
 
@@ -64,5 +65,42 @@ describe('Settings health check', () => {
     expect(screen.getByText(MODEL_INFO.parameters)).toBeInTheDocument();
     expect(screen.getByText(MODEL_INFO.architecture)).toBeInTheDocument();
     expect(screen.getByText(MODEL_INFO.weights)).toBeInTheDocument();
+  });
+
+  it('shows "degraded" (not "unreachable") when /health returns a 503 body', async () => {
+    // Backend up but model not loaded: /health returns HTTP 503 with a body.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: { get: () => null },
+        json: async () => ({ status: 'degraded', model_loaded: false }),
+      }),
+    );
+
+    render(<Settings {...baseProps} />);
+
+    expect(
+      await screen.findByText(/degraded \(model NOT loaded\)/i),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('Settings camera-height input', () => {
+  it('accepts the boundary value 5000 instead of reverting it', async () => {
+    // Health never resolves; we only exercise the height input here.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const setCameraHeight = vi.fn();
+    const user = userEvent.setup();
+
+    render(<Settings {...baseProps} setCameraHeight={setCameraHeight} />);
+
+    const input = screen.getByLabelText(/camera height/i);
+    await user.clear(input);
+    await user.type(input, '5000');
+    await user.tab(); // blur -> commitHeight
+
+    expect(setCameraHeight).toHaveBeenCalledWith(5000);
   });
 });

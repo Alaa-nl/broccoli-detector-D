@@ -47,12 +47,13 @@ describe('detectImage', () => {
     );
   });
 
-  it('falls back to the status when the error body has no detail', async () => {
+  it('throws an ApiError with the status when the error body has no detail', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(fakeResponse({}, { ok: false, status: 503 })),
     );
 
+    await expect(detectImage(new FormData())).rejects.toBeInstanceOf(ApiError);
     await expect(detectImage(new FormData())).rejects.toThrow(/Server returned 503/);
   });
 
@@ -79,14 +80,29 @@ describe('getHealth', () => {
     });
   });
 
-  it('checks response.ok and throws an ApiError instead of returning the body', async () => {
+  it('returns the degraded body on a 503 (backend up, model not loaded)', async () => {
+    // /health signals "degraded" with HTTP 503 + a JSON body; that body is
+    // meaningful, so getHealth returns it rather than treating it as a failure.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        fakeResponse({ detail: 'unhealthy' }, { ok: false, status: 503 }),
+        fakeResponse(
+          { status: 'degraded', model_loaded: false },
+          { ok: false, status: 503 },
+        ),
       ),
     );
 
-    await expect(getHealth()).rejects.toBeInstanceOf(ApiError);
+    await expect(getHealth()).resolves.toEqual({
+      status: 'degraded',
+      model_loaded: false,
+    });
+  });
+
+  it('rethrows an AbortError untouched', async () => {
+    const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortErr));
+
+    await expect(getHealth()).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

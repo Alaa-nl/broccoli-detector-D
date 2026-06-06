@@ -58,7 +58,9 @@ export default function Settings({
 
   function commitHeight() {
     const value = parseFloat(heightInput);
-    if (Number.isFinite(value) && value > 100 && value < 5000) {
+    // Inclusive bounds [100, 5000] to match the clamp helper, the load path,
+    // and the input's min/max - so the boundary values can actually be entered.
+    if (Number.isFinite(value) && value >= 100 && value <= 5000) {
       setCameraHeight(value);
     } else {
       // Reset to the saved value if the input was bad.
