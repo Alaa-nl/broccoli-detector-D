@@ -1,8 +1,5 @@
-"""
-ImageUploader: handles file uploads, format checks, and saving.
-
-This service keeps all the file-handling logic in one place,
-so the API route stays short and clear.
+"""Validates and saves user-uploaded images. Filename and format are
+server-controlled (decoded from content, not the user-supplied name).
 """
 
 import uuid
@@ -15,37 +12,27 @@ from PIL import Image, UnidentifiedImageError
 
 from app import config
 
-# Reject images whose decoded pixel count would blow up memory
-# (a "decompression bomb": a tiny file that expands to enormous
-# dimensions). Setting this at import time also arms Pillow's own
-# guard, which raises Image.DecompressionBombError during decode.
+# Arm Pillow's decompression bomb guard at import time; raises
+# Image.DecompressionBombError during decode if exceeded.
 Image.MAX_IMAGE_PIXELS = config.MAX_IMAGE_PIXELS
 
 
 class ImageUploader:
     """Save user-uploaded images to disk after basic validation."""
-
-    # Only these file types are allowed (matches the Upload screen). This is
-    # a cheap early pre-filter on the *claimed* filename extension; the
-    # authoritative check is the decoded image format (see FORMAT_TO_EXT).
+    
+    # Cheap pre-filter on the claimed extension; real check is FORMAT_TO_EXT.
     ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
-    # Canonical extension for each image format Pillow reports after decoding
-    # the header. The saved filename is built from this (not from the user's
-    # filename), so the on-disk name always reflects the true content and is
-    # fully server-controlled. Anything not in this map is rejected.
+    # Map decoded Pillow format to extension. The saved filename uses this,
+    # not the user's filename, so it always reflects real content.
     FORMAT_TO_EXT = {"JPEG": ".jpg", "PNG": ".png"}
 
-    # Max file size in bytes (matches the limit shown on the Upload screen).
     MAX_FILE_SIZE_BYTES = config.MAX_FILE_SIZE_BYTES
 
-    # Max decoded image size in pixels (width * height). Bounds the
-    # memory used by .convert("RGB") and the later np.array() in the
-    # detector, independent of the on-disk file size above.
+    # Decoded pixel cap; bounds memory in .convert() and downstream np.array().
     MAX_IMAGE_PIXELS = config.MAX_IMAGE_PIXELS
 
-    # Read the upload in chunks so we can abort on an oversized body
-    # before the whole thing is buffered into memory.
+    # Chunk size for streaming reads; lets us abort oversized uploads early.
     READ_CHUNK_BYTES = config.READ_CHUNK_BYTES
 
     def __init__(self, upload_dir: Path):
@@ -72,16 +59,14 @@ class ImageUploader:
             HTTPException: If the file is missing, too big,
                 or not a valid image.
         """
-        # Check that a file name is present.
         if not upload.filename:
             raise HTTPException(
                 status_code=400,
                 detail="No file name was sent with the upload.",
             )
 
-        # Cheap pre-filter on the claimed filename extension so obvious
-        # non-images are rejected before we read the body. The saved name
-        # does NOT use this value; the real format is decided after decode.
+        # Quick reject on extension before reading the body; the real check
+        # is the decoded format below.
         claimed_ext = Path(upload.filename).suffix.lower()
         if claimed_ext not in self.ALLOWED_EXTENSIONS:
             raise HTTPException(
@@ -92,14 +77,8 @@ class ImageUploader:
                 ),
             )
 
-        # Read the upload in chunks with a running size cap. This aborts
-        # an oversized upload before the whole body is buffered into
-        # memory, instead of reading everything first and checking the
-        # size after the fact (which would already have spent the RAM).
-        # Each chunk is written straight into a BytesIO buffer instead of
-        # being collected in a list and joined at the end: that keeps a
-        # single copy in memory (the buffer) rather than the chunk list
-        # plus the joined bytes, and the same buffer is reused by
+        # Stream into a BytesIO with a running size cap: aborts oversized
+        # uploads without buffering them, and reuses the same buffer for
         # Image.open() below.
         total = 0
         buffer = BytesIO()
@@ -125,10 +104,8 @@ class ImageUploader:
         # at the end, so without this Image.open() would start at EOF and fail.
         buffer.seek(0)
 
-        # Open the file header to confirm it is a real image and to read
-        # its dimensions. Image.open() only parses the header (it does
-        # not decode the pixels yet), so this is cheap and safe to do
-        # before the pixel cap below.
+        # Image.open() only parses the header (no pixel decode), so it's
+        # cheap to do before the pixel cap check below.
         try:
             pil_image = Image.open(buffer)
         except (UnidentifiedImageError, OSError):
@@ -137,9 +114,8 @@ class ImageUploader:
                 detail="The file is not a valid image.",
             )
 
-        # Reject decompression bombs (tiny file, huge dimensions) before
-        # the expensive .convert("RGB") full decode, which would expand
-        # to width * height * 3 bytes in memory.
+        # Reject bombs (small file, huge pixel count) before the full RGB
+        # decode would allocate width*height*3 bytes.
         width, height = pil_image.size
         if width * height > self.MAX_IMAGE_PIXELS:
             raise HTTPException(
@@ -147,11 +123,9 @@ class ImageUploader:
                 detail="Image dimensions are too large.",
             )
 
-        # Determine the extension from what the file ACTUALLY decoded as,
-        # not from the (user-controlled) filename. .format is set by
-        # Image.open and is reset to None by .convert() below, so read it
-        # here. A mismatch (e.g. PNG bytes named "photo.jpg") is resolved in
-        # favour of the real content; an unsupported format is rejected.
+        # Use the decoded format, not the filename: catches PNG bytes
+        # named "photo.jpg". Read .format here before .convert() below
+        # resets it to None.
         img_format = pil_image.format
         ext = self.FORMAT_TO_EXT.get(img_format)
         if ext is None:
@@ -160,10 +134,8 @@ class ImageUploader:
                 detail="Unsupported image format. Please upload a JPG or PNG image.",
             )
 
-        # Convert to RGB to make sure we can run YOLO on it (PNGs may
-        # have an alpha channel that YOLO does not like). This is the
-        # full decode, so it is also where Pillow's own bomb guard and
-        # truncated-file errors surface.
+        # Convert to RGB for YOLO (alpha channels cause issues). This is
+        # the full decode, so bomb/truncation errors surface here.
         try:
             pil_image = pil_image.convert("RGB")
         except Image.DecompressionBombError:
@@ -177,9 +149,7 @@ class ImageUploader:
                 detail="The image file is truncated or corrupt.",
             )
 
-        # Build a unique image ID using uuid4 (random and short). The
-        # filename is image_id + the format-derived extension, so every
-        # component is server-controlled.
+        # Server-controlled filename: random UUID + format-derived extension.
         image_id = uuid.uuid4().hex[:12]
         saved_filename = f"{image_id}{ext}"
         saved_path = self.upload_dir / saved_filename

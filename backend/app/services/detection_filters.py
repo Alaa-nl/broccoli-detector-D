@@ -1,11 +1,4 @@
-"""
-Detection post-processing filters.
-
-Pure functions that operate on the raw detection dicts the detector returns
-(`{'x1','y1','x2','y2','confidence'}`). Keeping them here - out of the HTTP
-route - makes them reusable and unit-testable in isolation, consistent with
-the rest of the service layer.
-"""
+"""Post-processing filters for raw YOLO detection dicts."""
 
 from typing import List
 

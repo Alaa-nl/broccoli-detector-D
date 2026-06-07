@@ -1,10 +1,4 @@
-"""
-BroccoliDetector: loads the YOLOv8n model and runs detections.
-
-This class wraps the Ultralytics YOLO model. We keep all
-model-related code in one place so the rest of the app
-does not need to know about Ultralytics.
-"""
+"""YOLOv8n inference wrapper with optional SHA-256 weights verification."""
 
 import hashlib
 import logging
@@ -17,8 +11,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from PIL import Image
 
-# We import YOLO from ultralytics. This is the same library
-# we used in Deliverable B for training.
+
 from ultralytics import YOLO
 
 from app import config
@@ -27,10 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class BroccoliDetector:
-    """Wrapper around the YOLOv8n model trained in Deliverable B."""
+    """Thread-safe YOLOv8n inference wrapper."""
 
-    # Read the weights file in 1 MB chunks when hashing so we never buffer
-    # the whole (multi-MB) file in memory just to verify it.
+    # Hash the .pt in 1 MB chunks to avoid loading it all into memory.
     _HASH_CHUNK_BYTES = 1024 * 1024
 
     def __init__(
@@ -43,36 +35,25 @@ class BroccoliDetector:
 
         Args:
             weights_path: Path to best.pt (the trained model file).
-            conf_threshold: Minimum confidence to keep a detection. This is
-                only a fallback default; the /api/detect route always passes
-                an explicit value, so it is not used in the live path.
-            expected_sha256: Known-good SHA-256 of the weights file. When
-                provided (or set via the EXPECTED_WEIGHTS_SHA256 env var),
-                the file is hashed and compared BEFORE it is handed to
-                Ultralytics/torch.load. A .pt file is a pickle archive, so
-                torch.load executes any code embedded in it; verifying the
-                hash first means a tampered file is rejected and never
-                unpickled. When None/unset, verification is skipped (a
-                warning is printed) and the file loads as before.
+            conf_threshold: Default min confidence. Fallback only; the
+                /api/detect route always passes an explicit value.
+            expected_sha256: Known-good SHA-256 of the weights file (or
+                set via EXPECTED_WEIGHTS_SHA256). Hashed and compared
+                before torch.load runs, since .pt files are pickles and
+                loading executes embedded code. None skips the check.
         """
         self.weights_path = Path(weights_path)
         self.conf_threshold = conf_threshold
         self.expected_sha256 = expected_sha256 or config.EXPECTED_WEIGHTS_SHA256
 
-        # The Ultralytics YOLO model is NOT thread-safe: its internal
-        # predictor reuses buffers/state between calls, and the Results
-        # objects it returns reference that shared state. One detector
-        # instance is shared across all requests (see main.py), and
-        # inference now runs on a worker thread (run_in_threadpool in
-        # detect.py), so two requests could otherwise call model.predict
-        # at the same time. This lock serialises access so only one call
-        # touches the model at a time.
+        # YOLO is not thread-safe: the predictor reuses buffers between calls
+        # and Results alias that state. Inference runs on a worker thread, so
+        # serialise access to the shared model.
         self._lock = threading.Lock()
 
-        # If the weights file is missing, we still want the app
-        # to start so the team can develop the frontend without it.
-        # In that case self.model stays None: is_ready() reports False,
-        # the /detect route returns 503, and predict() raises if called.
+        # Missing weights: keep self.model = None so frontend dev can
+        # iterate without best.pt. is_ready() will report False and
+        # /detect returns 503.
         if not self.weights_path.exists():
             logger.warning(
                 "Weights file not found (%s). The detector will return empty "
@@ -92,41 +73,26 @@ class BroccoliDetector:
             self.model = YOLO(str(self.weights_path))
 
     def _verify_integrity(self) -> None:
-        """Check the weights file hash against the expected value.
+        """Verify the weights file's SHA-256 against the expected value.
 
-        - No expected hash configured: behaviour depends on the environment.
-          In production (DEPLOY_ENV=production) this is a fatal misconfig and
-          raises, so a prod server never loads weights unverified ("fail
-          closed"). In dev it logs a warning and skips the check, keeping the
-          local flow working without extra configuration.
-        - Expected hash configured and matches: return quietly; the caller
-          proceeds to load the model.
-        - Expected hash configured and does NOT match: raise RuntimeError so
-          the tampered file is never unpickled. This is a security/tamper
-          event and is intentionally NOT bypassable by ALLOW_MISSING_WEIGHTS
-          (that flag only covers a genuinely missing file for frontend dev).
+        In production, an unset expected hash is a fatal misconfig: we
+        raise rather than load weights unverified (fail-closed). In dev,
+        we log a warning and skip the check so local work isn't blocked.
+        When a hash is configured, a mismatch raises so the tampered file
+        is never unpickled.
 
         Raises:
-            RuntimeError: If running in production with no expected hash
-                configured, or if an expected hash is set and the file's hash
-                does not match it.
+            RuntimeError: In production with no expected hash, or when the
+                hash does not match.
         """
         if not self.expected_sha256:
-            # The hash check is what lets us reject a tampered checkpoint
-            # before torch.load unpickles (and therefore executes) it. Silently
-            # skipping it in production would be "fail-open", so we refuse to
-            # start there; local dev stays optional (warn and continue).
             if config.IS_PROD:
                 raise RuntimeError(
-                    "EXPECTED_WEIGHTS_SHA256 is not set but DEPLOY_ENV=production. "
-                    "Refusing to load weights unverified in production; set "
-                    "EXPECTED_WEIGHTS_SHA256 to the known-good SHA-256 of best.pt "
-                    "(or run with DEPLOY_ENV=dev for local development)."
+                    "EXPECTED_WEIGHTS_SHA256 must be set when "
+                    "DEPLOY_ENV=production. Refusing to load weights unverified."
                 )
             logger.warning(
-                "Weights integrity verification is DISABLED "
-                "(EXPECTED_WEIGHTS_SHA256 not set). Set it to the known-good "
-                "SHA-256 of best.pt to reject tampered weights before load."
+                "Weights integrity check skipped (EXPECTED_WEIGHTS_SHA256 not set)."
             )
             return
 
@@ -153,13 +119,7 @@ class BroccoliDetector:
         return digest.hexdigest()
 
     def is_ready(self) -> bool:
-        """Whether the detector can actually run inference.
-
-        True only when the YOLO weights loaded successfully. When the
-        weights file was missing at startup, self.model is None and this
-        returns False. Both /api/health and /api/detect call this so the
-        two readiness checks can never drift apart.
-        """
+        """True if the model loaded successfully and inference is possible."""
         return self.model is not None
 
     def predict(
@@ -181,50 +141,32 @@ class BroccoliDetector:
             'x1', 'y1', 'x2', 'y2', 'confidence'.
 
         Raises:
-            RuntimeError: If the model is not loaded (weights were missing
-                at startup). Callers should check is_ready() first; the
-                /detect route does this and returns 503 instead.
+            RuntimeError: If the model is not loaded. Check is_ready() first.
         """
-        # If the model could not load, refuse loudly instead of silently
-        # returning zero detections (which looks identical to a real photo
-        # with no broccoli). This check is ABOVE the lock on purpose: it
-        # touches no shared predictor state, so it needs no lock and never
-        # acquires one. The /detect route guards with is_ready() and
-        # returns 503 before getting here; this raise is a backstop for
-        # any other caller that forgets to check.
+        
+        # Backstop if a caller skipped is_ready().
         if self.model is None:
             raise RuntimeError(
                 "Model is not loaded; cannot run prediction. "
                 "Check that weights/best.pt exists."
             )
 
-        # Pick which threshold to use this call.
         conf = (
             conf_threshold
             if conf_threshold is not None
             else self.conf_threshold
         )
 
-        # Convert the PIL image to a NumPy array. YOLO accepts
-        # both PIL and NumPy, but NumPy is a bit faster.
+        # NumPy array is faster than PIL for YOLO input.
         img_array = np.array(image)
 
-        # The shared YOLO model is not thread-safe, and the Results it
-        # returns alias predictor state that the next predict() call
-        # overwrites. So we hold the lock for the whole block below -
-        # the predict() call AND the loop that reads results[0].boxes -
-        # releasing it only once every box has been turned into plain
-        # Python floats via .cpu().numpy().
+        # Hold the lock through both predict() and the box-extraction loop:
+        # Results alias predictor state that the next call overwrites.
         with self._lock:
-            # Measure how long inference takes (for the demo UI). The
-            # timer starts after the lock is held, so this reports pure
-            # model time and excludes any time spent waiting for another
-            # request's inference to finish. Use monotonic() (not time()) so a
-            # system-clock change mid-inference can't skew - or negate - it.
+            # Timer inside the lock: measures pure inference, excludes wait.
             start_time = time.monotonic()
 
-            # Run the model. We pass conf to filter out low-confidence
-            # boxes and verbose=False to keep the terminal clean.
+            # verbose=False keeps the terminal clean during inference.
             results = self.model.predict(
                 source=img_array,
                 conf=conf,
@@ -233,13 +175,11 @@ class BroccoliDetector:
 
             inference_time_ms = (time.monotonic() - start_time) * 1000
 
-            # Extract bounding boxes from the YOLO result object.
             detections = []
             if len(results) > 0:
                 result = results[0]
                 boxes = result.boxes
 
-                # Loop over each detected box.
                 for i in range(len(boxes)):
                     # xyxy gives us [x1, y1, x2, y2] in original image pixels.
                     xyxy = boxes.xyxy[i].cpu().numpy()
@@ -253,6 +193,5 @@ class BroccoliDetector:
                         "confidence": box_conf,
                     })
 
-        # Lock released: `detections` now holds only plain Python floats,
-        # safe to use while another request runs inference.
+        # detections is plain floats here, safe to use after the lock releases.
         return detections, inference_time_ms

@@ -1,41 +1,8 @@
-"""
-SizeEstimator: converts bounding box pixel size to real-world size.
+"""Estimates crown size in mm from bounding box pixel dimensions.
 
-Background
-----------
-The original RGB-D dataset has depth data, but the JPGs we use
-do not include per-pixel depth. So we use a simple pinhole camera
-model to estimate crown diameter from the bounding box width.
-
-The math
---------
-The Intel RealSense D415 used to record the dataset has a
-horizontal field of view of about 69.4 degrees (Intel docs).
-
-If the camera is at height H above the ground and points
-straight down, the width of the ground area it sees is:
-
-    ground_width_mm = 2 * H * tan(FOV / 2)
-
-We then get the scale factor (millimetres per pixel):
-
-    mm_per_pixel = ground_width_mm / image_width_px
-
-And finally the crown diameter:
-
-    crown_diameter_mm = bbox_width_px * mm_per_pixel
-
-Limits of this simple model
----------------------------
-- It assumes the camera is at a fixed height. The team asked
-  Surya about this by email but did not get a final answer.
-  The default height (1000 mm) is a sensible guess based on
-  a person walking the row with a hand-held camera.
-- It ignores lens distortion near the image edges.
-- It uses bounding box width as a proxy for crown diameter.
-
-The user can change the camera height in the Settings screen
-to calibrate the estimate against a known reference.
+Uses a pinhole camera model with a configurable camera height (the JPG
+dataset has no per-pixel depth, so height is a fixed assumption).
+See docs/size-estimation.md for the math and known limits.
 """
 
 import math
@@ -47,17 +14,15 @@ from app import config
 class SizeEstimator:
     """Convert bounding box pixel size to crown diameter in mm."""
 
-    # Horizontal field of view of the Intel RealSense D415, in degrees
-    # (Intel datasheet: 69.4 H x 42.5 V). Sourced from config.
+    # From config (Intel D415 horizontal FOV in degrees).
     DEFAULT_FOV_HORIZONTAL_DEG = config.FOV_HORIZONTAL_DEG
 
-    # Default camera height above the ground in millimetres (1000 mm = 1 m,
-    # a person walking with the camera at hip/waist level). Sourced from config.
+    # From config (1000 mm = hip height for a walking operator).
     DEFAULT_CAMERA_HEIGHT_MM = config.DEFAULT_CAMERA_HEIGHT_MM
 
-    # Thresholds (in mm) for the friendly size labels (common retail grades).
-    SMALL_MAX_MM = config.SIZE_SMALL_MAX_MM    # < 8 cm = small / immature
-    MEDIUM_MAX_MM = config.SIZE_MEDIUM_MAX_MM  # 8-13 cm = medium; >= large
+    # Size category thresholds (from config).
+    SMALL_MAX_MM = config.SIZE_SMALL_MAX_MM    
+    MEDIUM_MAX_MM = config.SIZE_MEDIUM_MAX_MM  
 
     def __init__(
         self,
@@ -84,22 +49,18 @@ class SizeEstimator:
             at the ground plane.
 
         Raises:
-            ValueError: If image_width_px is not positive (a 0/negative width
-                makes the scale factor undefined and would divide by zero).
+            ValueError: If image_width_px is not positive.
         """
-        # A non-positive width is meaningless and would divide by zero below.
-        # Real uploads always have width >= 1, so this guards future/unit-test
-        # callers and makes the failure explicit instead of a ZeroDivisionError.
+        
+        # Explicit guard so callers get ValueError instead of ZeroDivisionError.
         if image_width_px <= 0:
             raise ValueError("image_width_px must be positive.")
 
-        # Convert FOV from degrees to radians for math.tan().
         fov_rad = math.radians(self.fov_horizontal_deg)
 
         # Width of the ground area the camera sees (in mm).
         ground_width_mm = 2.0 * self.camera_height_mm * math.tan(fov_rad / 2.0)
 
-        # Scale factor: mm per pixel.
         return ground_width_mm / image_width_px
 
     def estimate_diameter(
@@ -122,15 +83,13 @@ class SizeEstimator:
         Returns:
             Tuple of (diameter_mm, diameter_cm, size_category).
         """
-        # Get scale factor for this image size.
         scale = self.mm_per_pixel(image_width_px)
 
-        # Average the two box sides, then convert to mm.
         avg_side_px = (bbox_width_px + bbox_height_px) / 2.0
         diameter_mm = avg_side_px * scale
         diameter_cm = diameter_mm / 10.0
 
-        # Pick a friendly label so the farmer can decide quickly.
+        # Bucket into small / medium / large.
         if diameter_mm < self.SMALL_MAX_MM:
             category = "small"
         elif diameter_mm < self.MEDIUM_MAX_MM:

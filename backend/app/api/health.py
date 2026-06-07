@@ -10,16 +10,13 @@ router = APIRouter()
 
 @router.get("/health")
 def health(request: Request, response: Response):
-    """Liveness + model check (cheap; used by the platform healthcheck).
+"""Liveness + model check, used by the platform healthcheck.
 
-    Same body shape as before, but now signals degraded state with HTTP 503
-    when the model is not loaded, so load balancers / the platform react
-    instead of seeing a misleading 200. Kept lightweight (no inference, no
-    disk I/O) so it stays well within the healthcheck timeout.
+    Returns 503 when the model isn't loaded so load balancers see the
+    degraded state. Kept cheap (no inference, no disk I/O) to stay within
+    the healthcheck timeout, so don't add heavy checks here.
     """
-    # We use the same is_ready() check that /detect guards on, so the two
-    # can never drift. getattr handles the (unlikely) case where the
-    # detector was never set on app.state.
+    # getattr handles the (unlikely) case where startup didn't set the detector.
     detector = getattr(request.app.state, "detector", None)
     model_loaded = detector is not None and detector.is_ready()
 
@@ -33,19 +30,16 @@ def health(request: Request, response: Response):
 def ready(request: Request, response: Response):
     """Readiness probe: confirms the server can actually serve a detection.
 
-    Deeper than /health: besides the model being loaded, it verifies the
-    uploads directory is writable by writing and deleting a tiny probe file
-    (a real /detect must save the original and annotated images there). This
-    is an on-demand readiness check and is intentionally NOT the platform
-    healthcheck path, so /health stays cheap. Returns 503 (with which check
-    failed) when not ready.
+    Goes beyond /health by also writing a probe file to the uploads
+    directory, since /detect must save images there. On-demand only,
+    not on the platform healthcheck path (so /health stays cheap).
+    Returns 503 when any check fails.
     """
     detector = getattr(request.app.state, "detector", None)
     model_loaded = detector is not None and detector.is_ready()
 
-    # Confirm the uploads dir is writable: a read-only or full disk would make
-    # every /detect fail at save time. The probe name starts with "." so the
-    # retention sweep ignores it; we delete it immediately regardless.
+    # Probe write to uploads/ so a read-only or full disk surfaces here
+    # instead of failing every /detect. Dot prefix avoids the retention sweep.
     uploads_writable = False
     upload_dir = getattr(request.app.state, "upload_dir", None)
     if upload_dir is not None:

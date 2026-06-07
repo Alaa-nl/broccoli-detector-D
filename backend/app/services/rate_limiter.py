@@ -1,12 +1,6 @@
-"""
-RateLimiter: a small in-memory, per-key request limiter.
+"""In-memory per-key rate limiter for the /api/detect endpoint.
 
-We use this to cap how often a single client can call the CPU-heavy
-/api/detect endpoint, so a flood of requests cannot peg the server and
-deny service to everyone else. It is deliberately dependency-free and
-process-local: good enough for the single-worker PoC deployment. A
-multi-process / multi-instance setup would need a shared store (e.g.
-Redis) instead.
+Process-local; a multi-instance deploy would need a shared store like Redis.
 """
 
 import random
@@ -58,7 +52,6 @@ class RateLimiter:
         with self._lock:
             hits = self._hits[key]
 
-            # Drop timestamps that have fallen out of the window.
             while hits and hits[0] <= cutoff:
                 hits.popleft()
 
@@ -66,9 +59,8 @@ class RateLimiter:
             if allowed:
                 hits.append(now)
 
-        # Opportunistically drop fully-expired keys so the limiter bounds its
-        # own memory - callers don't have to reach in and do it. _prune takes
-        # the lock itself, so run it after releasing the block above.
+        # Best-effort prune to bound memory. Must run AFTER the lock block above:
+        # _prune acquires the lock itself, and re-entering would deadlock.
         if random.random() < _PRUNE_PROBABILITY:
             self._prune()
 

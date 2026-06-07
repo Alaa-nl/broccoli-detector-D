@@ -1,12 +1,4 @@
-"""
-The main /api/detect endpoint.
-
-This route ties together all the services:
-  1. ImageUploader  - saves the file
-  2. BroccoliDetector - finds the crowns
-  3. SizeEstimator - converts pixels to mm
-  4. Annotator - draws boxes on the result image
-"""
+"""The /api/detect endpoint: upload, infer, filter, measure, annotate."""
 
 import ipaddress
 import logging
@@ -41,31 +33,22 @@ from app.services.uploader import ImageUploader
 logger = logging.getLogger(__name__)
 
 
-# --- Access control for the public upload endpoint ----------------------
-#
-# The backend is internet-facing, so we (1) optionally require an API key
-# and (2) rate-limit per client. Auth is OPT-IN: it is enforced only when
-# the API_KEY env var is set. Local dev (no API_KEY) stays keyless; in
-# production Render sets API_KEY on the backend and the nginx frontend
-# injects the same value as the X-API-Key header (the browser never sees
-# it).
+# Auth (opt-in via API_KEY env var) and per-IP rate limiting. In production,
+# nginx injects X-API-Key server-side so it never reaches the browser.
 
-# Rate-limit configuration (per client IP) comes from config.
 _rate_limiter = RateLimiter(
     config.RATE_LIMIT_MAX, config.RATE_LIMIT_WINDOW_SECONDS
 )
 
 
 def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
-    """Reject the request unless it carries the configured API key.
+    """Reject the request if API_KEY is set and the X-API-Key doesn't match.
 
-    No-op when API_KEY is unset (development), so the keyless local flow
-    keeps working. Uses a constant-time compare to avoid leaking the key
-    via timing.
+    No-op when API_KEY is unset. Uses constant-time compare against timing.
     """
     expected = os.getenv("API_KEY")
     if not expected:
-        return  # Auth disabled (no key configured).
+        return 
     if x_api_key is None or not secrets.compare_digest(x_api_key, expected):
         raise HTTPException(
             status_code=401,
@@ -74,11 +57,10 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
 
 
 def _normalise_ip(value: str) -> Optional[str]:
-    """Return the canonical form of `value` if it is a valid IP, else None.
+    """Return the canonical IP string, or None if not a valid address.
 
-    Canonicalising (via ipaddress) means equivalent spellings of the same
-    address - e.g. the IPv6 forms "::1" and "0:0:0:0:0:0:0:1" - collapse to
-    one limiter key instead of counting as two distinct clients.
+    Canonicalising collapses equivalent forms (e.g. "::1" and
+    "0:0:0:0:0:0:0:1") so they don't count as separate rate-limit keys.
     """
     try:
         return str(ipaddress.ip_address(value))
@@ -87,14 +69,11 @@ def _normalise_ip(value: str) -> Optional[str]:
 
 
 def _client_key(request: Request) -> str:
-    """Best-effort client identity for rate limiting.
+    """Best-effort client IP for rate limiting.
 
-    Behind nginx the real client IP arrives in X-Forwarded-For / X-Real-IP
-    (set by the proxy). Those headers are client-settable, though, so we only
-    use a value once it actually parses as an IP address - otherwise a caller
-    could send arbitrary (or constantly rotating) strings to dodge the limit
-    or balloon the limiter's key set. When no header carries a valid IP we
-    fall back to the socket peer, which the client cannot spoof.
+    Behind nginx the real IP comes via X-Forwarded-For / X-Real-IP. Those
+    headers are client-settable, so we only trust values that parse as IPs.
+    Falls back to the unspoofable socket peer when no header is valid.
     """
     for header_name in ("x-forwarded-for", "x-real-ip"):
         header_value = request.headers.get(header_name)
@@ -120,12 +99,8 @@ def rate_limit(request: Request) -> None:
 
 
 def get_uploader() -> ImageUploader:
-    """Provide the image uploader.
+    """FastAPI dependency. Tests can override via app.dependency_overrides."""
 
-    Injected (rather than built inline in the route) so the handler is
-    decoupled from the concrete class and tests can swap it via
-    app.dependency_overrides.
-    """
     return ImageUploader(upload_dir=config.UPLOAD_DIR)
 
 
@@ -138,11 +113,8 @@ def get_size_estimator(
                     "1 metre). Must be between 100 and 5000 mm (inclusive).",
     ),
 ) -> SizeEstimator:
-    """Provide a SizeEstimator configured with the request's camera height.
+    """FastAPI dependency. Reads camera_height_mm from the multipart form."""
 
-    The camera_height_mm form field (and its bounds) is declared here, so it
-    is still validated as part of the request body exactly as before.
-    """
     return SizeEstimator(camera_height_mm=camera_height_mm)
 
 
@@ -170,28 +142,18 @@ async def detect_broccoli(
     uploader: ImageUploader = Depends(get_uploader),
     size_estimator: SizeEstimator = Depends(get_size_estimator),
 ):
-    """Run broccoli crown detection on an uploaded image.
+"""Run broccoli crown detection on an uploaded image.
 
-    Steps:
-      1. Save the file to disk (with validation).
-      2. Run YOLOv8n to find the bounding boxes.
-      3. Optionally drop too-elongated boxes (leaf filter).
-      4. Convert each box to a crown diameter in mm.
-      5. Draw the boxes on a new annotated image.
-      6. Return a JSON response with all the results.
+    Pipeline: save → detect → leaf filter → size estimate → annotate → respond.
     """
-    # --- Step 1: save the upload (uploader injected via Depends) ---
+    # --- Step 1: save the upload ---
     saved_path, image_id, pil_image = await uploader.save(file)
 
     img_width = pil_image.width
     img_height = pil_image.height
 
-    # --- Step 2: run the YOLO model with the chosen confidence ---
-    # The detector was loaded one time in main.py and stored on app.state.
-    # The detector object always exists (main.py sets it at startup), but
-    # its model is None when best.pt was missing. Guard on is_ready() so a
-    # misconfigured server returns a clear 503 (service not ready) instead
-    # of silently returning zero crowns at HTTP 200.
+    # --- Step 2: run YOLO with the chosen confidence ---
+    # 503 if weights didn't load at startup (model would silently return zero crowns).
     detector = request.app.state.detector
     if detector is None or not detector.is_ready():
         raise HTTPException(
@@ -200,11 +162,8 @@ async def detect_broccoli(
                    "Please try again later.",
         )
 
-    # Run YOLO inference on a worker thread so it does not block the
-    # event loop. The call is CPU-bound and can take hundreds of ms;
-    # offloading it keeps the server responsive (health checks, other
-    # uploads) while one detection is running. The detector serialises
-    # access to the shared model internally with a lock.
+    # Offload CPU-bound inference to a worker thread so the event loop
+    # stays responsive. The detector's own lock serialises model access.
     raw_detections, inference_time_ms = await run_in_threadpool(
         detector.predict,
         pil_image,
@@ -213,9 +172,7 @@ async def detect_broccoli(
     detections_before_filter = len(raw_detections)
 
     # --- Step 3: optional aspect-ratio filter ---
-    # Real broccoli crowns are roughly square from above; very elongated
-    # boxes are usually leaves. The filter lives in app/services so it is
-    # reusable and unit-testable on its own.
+    # Crowns are roughly square from above; elongated boxes are leaves.
     if aspect_ratio_filter:
         raw_detections = filter_by_aspect_ratio(raw_detections)
 
@@ -250,10 +207,8 @@ async def detect_broccoli(
     # --- Step 5: draw the boxes ---
     annotated_filename = f"{image_id}_annotated.jpg"
     annotated_path = config.UPLOAD_DIR / annotated_filename
-    # Drawing the boxes and JPEG-encoding the result (annotated.save) is also
-    # blocking, so offload it. The annotator takes plain dicts; derive them
-    # from the models we already built (model_dump gives the same nested
-    # shape) instead of maintaining a second hand-built list.
+    # Drawing + JPEG-encoding is blocking; offload it. The annotator wants
+    # plain dicts, so derive them from the models via model_dump.
     await run_in_threadpool(
         draw_detections,
         pil_image,
@@ -262,14 +217,10 @@ async def detect_broccoli(
     )
 
     # --- Step 6: build the response ---
-    # The frontend will call these URLs to show the images.
     image_url = f"/uploads/{saved_path.name}"
     annotated_url = f"/uploads/{annotated_filename}"
 
-    # One structured line per completed detection, for server-side
-    # observability (latency, detection counts). The logging filter in
-    # main.py prefixes it with the request id, so it correlates with the
-    # X-Request-ID the client received.
+    # Structured detection log; the main.py filter adds the request id.
     logger.info(
         "detection complete: image_id=%s dims=%dx%d crowns=%d filtered=%d "
         "conf=%.2f camera_height_mm=%.0f inference_ms=%.1f",
