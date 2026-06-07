@@ -81,12 +81,12 @@ export default function About() {
           The full source code is on GitHub:
         </p>
         <a
-          href="https://github.com/Alaa-nl/broccoli-detector-B"
+          href="https://github.com/Alaa-nl/broccoli-detector-D"
           target="_blank"
           rel="noreferrer"
           className="text-sm text-broccoli-700 dark:text-broccoli-400 hover:underline break-all"
         >
-          github.com/Alaa-nl/broccoli-detector-B
+          github.com/Alaa-nl/broccoli-detector-D
         </a>
       </section>
 

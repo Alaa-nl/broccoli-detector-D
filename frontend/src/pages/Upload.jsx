@@ -2,14 +2,20 @@
 // Lets the user drop or pick an image, sends it to the backend,
 // and navigates to the Results page when the response is ready.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud, FileImage, AlertCircle, Loader2 } from 'lucide-react';
+import { detectImage } from '../api/client';
+import {
+  ALLOWED_TYPES,
+  MAX_FILE_SIZE_MB,
+  ACCEPT,
+  TYPE_LABELS,
+} from '../constants/upload.js';
 
-// Files larger than this are rejected on the client too,
-// so the user gets fast feedback (the backend also checks).
-const MAX_FILE_SIZE_MB = 10;
-const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
+// Give up on a detection after this long so the UI can never get stuck
+// on "Detecting..." forever (CPU inference can be slow, but not endless).
+const DETECT_TIMEOUT_MS = 60000;
 
 export default function Upload({
   cameraHeight,
@@ -21,10 +27,25 @@ export default function Upload({
   const [previewUrl, setPreviewUrl] = useState(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
+  // null = not dragging; 'valid' = dragging an acceptable file; 'invalid' =
+  // dragging a file we can already tell is the wrong type (previewed from the
+  // drag's MIME type, before the drop).
+  const [dragState, setDragState] = useState(null);
 
-  const fileInputRef = useRef(null);
+  // Holds the in-flight request's controller so Cancel (and the timeout
+  // watchdog) can abort it. Null when no request is running.
+  const abortRef = useRef(null);
   const navigate = useNavigate();
+
+  // Release the preview's object URL when it's replaced or the page
+  // unmounts, so picking many images doesn't leak blob: URLs. The cleanup
+  // runs only after the next render / on unmount, by which point the <img>
+  // already shows the new URL - so a URL still in use is never revoked.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   // Validate the chosen file (type + size).
   function pickFile(selected) {
@@ -46,9 +67,31 @@ export default function Upload({
   }
 
   // Drag-and-drop handlers.
+
+  // During dragover the browser hides the file's name and bytes for privacy,
+  // but it DOES expose the MIME type via dataTransfer.items - enough to preview
+  // whether the file will be accepted. Return 'invalid' only when the type is
+  // positively known and unsupported; an empty/unknown type stays 'valid', so a
+  // good file is never rejected on a guess (handleDrop/pickFile still run the
+  // real validation). Only the first item is previewed, like the drop handler.
+  function dragStateFor(e) {
+    const items = e.dataTransfer?.items;
+    if (items && items.length > 0) {
+      const first = items[0];
+      if (
+        first.kind === 'file' &&
+        first.type &&
+        !ALLOWED_TYPES.includes(first.type)
+      ) {
+        return 'invalid';
+      }
+    }
+    return 'valid';
+  }
+
   function handleDrop(e) {
     e.preventDefault();
-    setIsDragging(false);
+    setDragState(null);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       pickFile(e.dataTransfer.files[0]);
     }
@@ -60,6 +103,18 @@ export default function Upload({
     setError('');
     setIsLoading(true);
 
+    // Abort the request if it runs too long, so the button can't stay stuck
+    // on "Detecting..." forever. `timedOut` tells the catch block apart a
+    // watchdog abort from a user-initiated Cancel (both surface as
+    // AbortError) without relying on AbortSignal.reason.
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, DETECT_TIMEOUT_MS);
+
     // Build the multipart form data.
     const formData = new FormData();
     formData.append('file', file);
@@ -68,28 +123,33 @@ export default function Upload({
     formData.append('aspect_ratio_filter', String(aspectRatioFilter));
 
     try {
-      const response = await fetch('/api/detect', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        // Try to read the error message that FastAPI sends back.
-        const errorBody = await response.json().catch(() => ({}));
-        throw new Error(errorBody.detail || `Server returned ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await detectImage(formData, { signal: controller.signal });
       onDetected(data);
 
       // Move on to the results page.
       navigate('/results');
     } catch (err) {
-      console.error(err);
-      setError(err.message || 'Something went wrong. Please try again.');
+      if (err.name === 'AbortError') {
+        setError(
+          timedOut
+            ? 'Request timed out. The server may be busy - please try again.'
+            : 'Detection cancelled.'
+        );
+      } else {
+        // The client already logs the failure (dev only); just surface the
+        // message it built (which includes the support ref when present).
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
     } finally {
+      clearTimeout(timer);
+      abortRef.current = null;
       setIsLoading(false);
     }
+  }
+
+  // Let the user abort an in-flight detection immediately.
+  function cancelDetection() {
+    abortRef.current?.abort();
   }
 
   return (
@@ -101,14 +161,17 @@ export default function Upload({
         </p>
       </header>
 
-      {/* Drop zone. */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
+      {/* Drop zone. A <label> wrapping the file input so clicking, dragging,
+          and keyboard focus (Tab to the input, Enter/Space to open the
+          picker) all work natively. */}
+      <label
+        onDragOver={(e) => { e.preventDefault(); setDragState(dragStateFor(e)); }}
+        onDragLeave={() => setDragState(null)}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`card p-8 text-center cursor-pointer border-2 border-dashed transition-colors ${
-          isDragging
+        className={`card p-8 text-center cursor-pointer border-2 border-dashed transition-colors block focus-within:ring-2 focus-within:ring-broccoli-500 ${
+          dragState === 'invalid'
+            ? 'border-red-500 bg-red-50 dark:bg-red-900/30'
+            : dragState === 'valid'
             ? 'border-broccoli-500 bg-broccoli-50 dark:bg-gray-700'
             : 'border-gray-300 dark:border-gray-600 hover:border-broccoli-400'
         }`}
@@ -129,28 +192,46 @@ export default function Upload({
         ) : (
           // Show the empty drop zone.
           <div className="space-y-3">
-            <UploadCloud className="w-12 h-12 mx-auto text-gray-400" />
-            <div className="font-semibold text-lg">Drag & Drop Image Here</div>
+            <UploadCloud
+              className={`w-12 h-12 mx-auto ${
+                dragState === 'invalid' ? 'text-red-500' : 'text-gray-400'
+              }`}
+            />
+            <div className="font-semibold text-lg">
+              {dragState === 'invalid'
+                ? 'Unsupported file type'
+                : 'Drag & Drop Image Here'}
+            </div>
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              or click to browse files
+              {dragState === 'invalid'
+                ? 'Please use a JPG or PNG image.'
+                : 'or click to browse files'}
             </div>
             <div className="flex gap-2 justify-center text-xs">
-              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">.JPG</span>
-              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">.PNG</span>
-              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">Max 10 MB</span>
+              {ALLOWED_TYPES.map((type) => (
+                <span
+                  key={type}
+                  className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full"
+                >
+                  {TYPE_LABELS[type]}
+                </span>
+              ))}
+              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">
+                Max {MAX_FILE_SIZE_MB} MB
+              </span>
             </div>
           </div>
         )}
 
-        {/* Hidden file input, triggered by the click above. */}
+        {/* Visually hidden but kept in the tab order (sr-only, not hidden),
+            so keyboard users can focus it and open the picker. */}
         <input
-          ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png"
+          accept={ACCEPT}
           onChange={(e) => pickFile(e.target.files?.[0])}
-          className="hidden"
+          className="sr-only"
         />
-      </div>
+      </label>
 
       {/* Tips card. */}
       <div className="card p-4 bg-yellow-50 dark:bg-gray-800 border-yellow-200 dark:border-yellow-900">
@@ -164,10 +245,18 @@ export default function Upload({
         </ul>
       </div>
 
-      {/* Error message. */}
+      {/* Error message. role="alert" is an assertive aria-live region, so a
+          screen reader announces the message the moment it appears - without
+          it, a dynamically inserted error is silent to non-sighted users. */}
       {error && (
-        <div className="card p-4 bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+        <div
+          role="alert"
+          className="card p-4 bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 flex items-start gap-3"
+        >
+          <AlertCircle
+            className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5"
+            aria-hidden="true"
+          />
           <div className="text-sm text-red-700 dark:text-red-300">{error}</div>
         </div>
       )}
@@ -187,6 +276,16 @@ export default function Upload({
           'Detect Broccoli'
         )}
       </button>
+
+      {/* Cancel button: only while a detection is in flight. */}
+      {isLoading && (
+        <button
+          onClick={cancelDetection}
+          className="btn-secondary w-full"
+        >
+          Cancel
+        </button>
+      )}
 
       <div className="text-xs text-gray-500 dark:text-gray-400 text-center space-y-1">
         <div>

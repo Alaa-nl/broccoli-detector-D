@@ -31,21 +31,78 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # --- Security headers --------------------------------------------------
+    # Sent on every response (the `always` flag also covers error/proxied
+    # responses). Defined at server level so they are inherited by the
+    # proxied /api/ and /uploads/ locations below (which add no headers of
+    # their own). nginx drops inherited add_header directives in any block
+    # that declares its own add_header, so the one block that does
+    # (location /, for Cache-Control) repeats these.
+    #   - nosniff: don't MIME-sniff; important because user-uploaded images
+    #     are served same-origin via /uploads/.
+    #   - DENY framing + CSP frame-ancestors: anti-clickjacking.
+    #   - CSP: everything loads from 'self'. style-src allows 'unsafe-inline'
+    #     for Tailwind/React inline styles; img-src allows blob:/data: for the
+    #     client-side image preview (URL.createObjectURL).
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" always;
+
+    # --- Compression -------------------------------------------------------
+    # Shrinks text assets on the wire. text/html is gzipped by default.
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types
+        text/plain
+        text/css
+        application/javascript
+        application/json
+        image/svg+xml;
+
+    # --- Static asset caching ---------------------------------------------
+    # Vite fingerprints these filenames (e.g. index-a1b2c3.js), so they are
+    # safe to cache long-term. Uses `expires` only (no add_header) so the
+    # security headers above are still inherited here. This regex location is
+    # evaluated before the prefix locations, which is why /api/ and /uploads/
+    # below use ^~ to keep priority (so e.g. /uploads/x.png is still proxied).
+    location ~* \.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp)$ {
+        expires 1y;
+        access_log off;
+        try_files $uri =404;
+    }
+
     # React Router uses client-side routes, so any unknown URL
-    # should serve index.html (the React app will handle it).
+    # should serve index.html (the React app will handle it). The HTML shell
+    # is never cached so users always pull the newest index.html (which then
+    # references the freshest fingerprinted assets). This block has its own
+    # add_header, so it must repeat the security headers from above.
     location / {
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" always;
     }
 
     # Forward API calls to the backend.
     # The variable in proxy_pass defers DNS resolution to request time;
     # we append $request_uri so the location prefix isn't stripped.
-    location /api/ {
+    # ^~ gives this prefix priority over the static-asset regex location
+    # above, so API paths are always proxied and never matched as files.
+    location ^~ /api/ {
         set $backend_upstream ${BACKEND_HOST}:${BACKEND_PORT};
         proxy_pass ${BACKEND_SCHEME}://$backend_upstream$request_uri;
         # Use the backend's hostname for SNI / virtual-host routing.
         proxy_set_header Host ${BACKEND_HOST};
         proxy_ssl_server_name on;
+        # Inject the backend API key server-side so the browser never sees
+        # it. When ${API_KEY} is empty (local dev), nginx drops the header
+        # and the keyless backend ignores it.
+        proxy_set_header X-API-Key "${API_KEY}";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -58,8 +115,10 @@ server {
         proxy_connect_timeout 30s;
     }
 
-    # Forward uploaded image requests too.
-    location /uploads/ {
+    # Forward uploaded image requests too. ^~ keeps this prefix ahead of the
+    # static-asset regex location, so e.g. /uploads/photo.png is proxied to
+    # the backend rather than being looked up as a local file.
+    location ^~ /uploads/ {
         set $backend_upstream ${BACKEND_HOST}:${BACKEND_PORT};
         proxy_pass ${BACKEND_SCHEME}://$backend_upstream$request_uri;
         proxy_set_header Host ${BACKEND_HOST};

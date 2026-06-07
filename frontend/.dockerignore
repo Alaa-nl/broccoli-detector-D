@@ -1,0 +1,12 @@
+# Keep the frontend build context lean. node_modules and dist are produced
+# fresh inside the builder stage (npm install + npm run build); copying host
+# copies bloats the context and can break the build (host-arch node_modules).
+node_modules
+dist
+.vite
+
+# Logs and local env files
+*.log
+npm-debug.log*
+.env
+.env.*

@@ -6,9 +6,12 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Install dependencies first (cached layer).
+# Install dependencies first (cached layer). Copy package.json AND
+# package-lock.json, then `npm ci`: a clean install of the exact versions
+# pinned in the lockfile, so every build is reproducible. It fails fast if
+# the lockfile is missing or out of sync with package.json.
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy the source code and build the production bundle.
 COPY . .
@@ -38,6 +41,7 @@ RUN printf '%s\n' \
     'export BACKEND_HOST="${BACKEND_HOST:-backend}"' \
     'export BACKEND_PORT="${BACKEND_PORT:-8000}"' \
     'export DNS_RESOLVER="${DNS_RESOLVER:-1.1.1.1 1.0.0.1}"' \
+    'export API_KEY="${API_KEY:-}"' \
     > /docker-entrypoint.d/10-derive-backend-url.envsh \
     && chmod +x /docker-entrypoint.d/10-derive-backend-url.envsh
 

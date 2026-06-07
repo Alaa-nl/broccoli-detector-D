@@ -26,6 +26,23 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true
+    envVars:
+      # Secret API key required on /api/detect. Render generates a random
+      # value on first deploy; the frontend pulls the same value below and
+      # injects it as the X-API-Key header (the browser never sees it).
+      - key: API_KEY
+        generateValue: true
+      # Known-good SHA-256 of backend/weights/best.pt. The detector hashes
+      # the file and refuses to load (torch.load/unpickle) if it does not
+      # match, rejecting a tampered/swapped checkpoint at startup.
+      # Update this value whenever the model is retrained.
+      - key: EXPECTED_WEIGHTS_SHA256
+        value: bf5f8500bba6a3b52bb55aec0212eef64581bff199e0e64a9f42322bf04acf6f
+      # Hide the interactive API docs (/docs, /redoc, /openapi.json) on the
+      # public backend so it does not advertise its endpoints. Local dev and
+      # docker compose leave this unset and keep the docs available.
+      - key: DEPLOY_ENV
+        value: production
 
   - type: web
     name: broccoli-frontend
@@ -35,12 +52,22 @@ services:
     dockerfilePath: ./Dockerfile
     autoDeploy: true
     envVars:
-      # Hardcoded because Render's fromService.property has no value
-      # that returns the public *.onrender.com URL. If the backend
-      # service is renamed/recreated, update these three values.
+      # Backend's public URL, hardcoded: Render's fromService can't return a
+      # service's public *.onrender.com URL (only its private name, which is
+      # unusable here - see the resolver note at the top of this file). The
+      # host below carries a Render-generated suffix (-00na); if the backend
+      # service is renamed or recreated that suffix changes, so update these
+      # three values then - otherwise the frontend proxies to a dead host (502).
       - key: BACKEND_SCHEME
         value: https
       - key: BACKEND_HOST
         value: broccoli-backend-00na.onrender.com
       - key: BACKEND_PORT
         value: "443"
+      # Same secret as the backend's API_KEY, kept in sync automatically.
+      # nginx injects it as X-API-Key on proxied /api/ requests.
+      - key: API_KEY
+        fromService:
+          type: web
+          name: broccoli-backend
+          envVarKey: API_KEY

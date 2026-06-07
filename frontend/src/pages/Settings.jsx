@@ -2,8 +2,20 @@
 // Lets the user change dark mode, the camera height (for size
 // estimation), and shows information about the loaded model.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
+import { getHealth } from '../api/client';
+import { MODEL_INFO } from '../constants/model.js';
+
+// Give up on the health check after this long so it can't sit on
+// "checking..." forever if the backend never answers.
+const HEALTH_TIMEOUT_MS = 10000;
+
+// Camera height is valid when it's a finite number within the inclusive
+// [100, 5000] mm range - matching the input's min/max, the clamp helper, and
+// the load path, so the boundary values can actually be entered.
+const isValidHeight = (value) =>
+  Number.isFinite(value) && value >= 100 && value <= 5000;
 
 export default function Settings({
   darkMode,
@@ -18,26 +30,65 @@ export default function Settings({
   // Local state for the camera height input.
   // We commit it to the parent only when the user finishes typing.
   const [heightInput, setHeightInput] = useState(String(cameraHeight));
+  // Mirror the latest typed value into a ref so the unmount safety-net below
+  // can read it without re-subscribing an effect on every keystroke.
+  const heightInputRef = useRef(heightInput);
+  heightInputRef.current = heightInput;
 
   // Health info from the backend.
   const [health, setHealth] = useState(null);
 
   useEffect(() => {
-    fetch('/api/health')
-      .then((res) => res.json())
+    // Abort on a timeout (report unreachable) or on unmount (stay silent so
+    // we don't set state on a gone component). `timedOut` separates the two,
+    // since both surface as an AbortError.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, HEALTH_TIMEOUT_MS);
+
+    getHealth({ signal: controller.signal })
       .then((data) => setHealth(data))
-      .catch(() => setHealth({ status: 'unreachable', model_loaded: false }));
+      .catch((err) => {
+        // Ignore an unmount-abort; a real timeout or network error still
+        // reports the backend as unreachable.
+        if (err.name !== 'AbortError' || timedOut) {
+          setHealth({ status: 'unreachable', model_loaded: false });
+        }
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, []);
 
   function commitHeight() {
     const value = parseFloat(heightInput);
-    if (Number.isFinite(value) && value > 100 && value < 5000) {
+    if (isValidHeight(value)) {
       setCameraHeight(value);
     } else {
       // Reset to the saved value if the input was bad.
       setHeightInput(String(cameraHeight));
     }
   }
+
+  // Safety net: commitHeight normally runs on blur or Enter, but some
+  // navigations unmount this page without firing blur first - e.g. the browser
+  // back/forward button, or any programmatic route change. Commit a still-valid
+  // typed value on unmount too, so Upload always uses the latest height the
+  // user entered rather than the last-committed one.
+  useEffect(() => {
+    return () => {
+      const value = parseFloat(heightInputRef.current);
+      if (isValidHeight(value)) {
+        setCameraHeight(value);
+      }
+    };
+  }, [setCameraHeight]);
 
   function resetDefaults() {
     setDarkMode(false);
@@ -78,6 +129,8 @@ export default function Settings({
           {/* Simple toggle switch. */}
           <button
             onClick={() => setDarkMode(!darkMode)}
+            role="switch"
+            aria-checked={darkMode}
             aria-label="Toggle dark mode"
             className={`relative w-12 h-7 rounded-full transition-colors ${
               darkMode ? 'bg-broccoli-600' : 'bg-gray-300'
@@ -147,7 +200,7 @@ export default function Settings({
           <input
             type="range"
             min={0.10}
-            max={0.90}
+            max={0.95}
             step={0.05}
             value={confThreshold}
             onChange={(e) => setConfThreshold(parseFloat(e.target.value))}
@@ -156,7 +209,7 @@ export default function Settings({
           <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
             <span>10% (more boxes)</span>
             <span>Default: 40%</span>
-            <span>90% (stricter)</span>
+            <span>95% (stricter)</span>
           </div>
         </div>
       </section>
@@ -179,6 +232,8 @@ export default function Settings({
           </div>
           <button
             onClick={() => setAspectRatioFilter(!aspectRatioFilter)}
+            role="switch"
+            aria-checked={aspectRatioFilter}
             aria-label="Toggle leaf filter"
             className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ml-3 ${
               aspectRatioFilter ? 'bg-broccoli-600' : 'bg-gray-300'
@@ -202,15 +257,16 @@ export default function Settings({
         Reset to Defaults
       </button>
 
-      {/* Model info card (matches the wireframe in the TFGD). */}
-      <section className="card p-5 bg-gray-900 dark:bg-gray-800 text-white">
+      {/* Model info card: a normal card (light in light mode, dark in dark
+          mode), consistent with the other sections above. */}
+      <section className="card p-5">
         <h2 className="font-semibold mb-3">Model Information</h2>
         <dl className="text-sm space-y-1">
-          <Row label="Architecture" value="YOLOv8n (Ultralytics)" />
-          <Row label="Parameters" value="3.0M" />
-          <Row label="Training mAP@0.5" value="0.976" />
-          <Row label="Mean IoU" value="0.916" />
-          <Row label="Weights" value="best.pt (about 6 MB)" />
+          <Row label="Architecture" value={MODEL_INFO.architecture} />
+          <Row label="Parameters" value={MODEL_INFO.parameters} />
+          <Row label="Training mAP@0.5" value={MODEL_INFO.trainingMap} />
+          <Row label="Mean IoU" value={MODEL_INFO.meanIoU} />
+          <Row label="Weights" value={MODEL_INFO.weights} />
           <Row
             label="Server status"
             value={
@@ -231,7 +287,7 @@ export default function Settings({
 function Row({ label, value }) {
   return (
     <div className="flex justify-between gap-3">
-      <dt className="text-gray-400">{label}</dt>
+      <dt className="text-gray-500 dark:text-gray-400">{label}</dt>
       <dd className="font-mono text-right">{value}</dd>
     </div>
   );

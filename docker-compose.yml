@@ -16,22 +16,58 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount the weights folder so we do not have to rebuild
-      # the image every time we update the model file.
-      - ./backend/weights:/app/weights
+      # Persist uploaded/annotated images on the host so they survive a
+      # container restart. The model (best.pt) is intentionally NOT mounted:
+      # the container uses the copy baked into the image, so local docker
+      # compose behaves the same as the deployed image. To use a new model,
+      # rebuild:  docker compose up --build.
       - ./backend/uploads:/app/uploads
+    # Load all backend configuration (rate limits, CORS, upload TTLs, log
+    # level, optional weights hash) from the root .env into the container.
+    # Without this, only the interpolated vars below would reach the backend.
+    env_file:
+      - .env
+    environment:
+      # API-key auth is OFF by default locally (empty key = no enforcement).
+      # To exercise the locked path, run: API_KEY=secret docker compose up
+      API_KEY: ${API_KEY:-}
     restart: unless-stopped
+    # Local safety ceiling, honored by `docker compose up`. It is a backstop
+    # against a runaway/leaking container eating all host memory - NOT a
+    # production mirror. It is set well ABOVE both what the app needs (CPU
+    # YOLO + torch inference sits around ~1 GB) and the production free-tier
+    # budget (512 MB); the demo runs locally precisely because inference needs
+    # far more than the free tier, so a tight limit here would OOM-kill it.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3g
 
   frontend:
     build: ./frontend
     container_name: broccoli-frontend
     ports:
       - "8080:80"
+    # Wait until the backend reports healthy before starting nginx. The
+    # backend's HEALTHCHECK (in backend/Dockerfile) hits /api/health, which is
+    # 200 only once the model is loaded - so the proxy never forwards to a
+    # not-ready backend (502) during a cold start.
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     environment:
       # Use Docker's embedded DNS so nginx can resolve "backend" by
       # compose service name. Default (1.1.1.1) is used in production
       # on Render with the backend's public hostname.
       DNS_RESOLVER: 127.0.0.11
+      # Must match the backend's API_KEY so nginx injects the right header.
+      API_KEY: ${API_KEY:-}
+    # Local safety ceiling (see backend). nginx only serves static files, so
+    # this is generous; just a backstop, not a production mirror.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m

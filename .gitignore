@@ -1,43 +1,59 @@
-# Python
+# ---------------------------------------------------------------------------
+# Python (FastAPI backend)
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 .venv/
 venv/
 env/
 *.egg-info/
 .pytest_cache/
 
+# ---------------------------------------------------------------------------
 # Model weights
-# We keep best.pt in the repo because the deployment platform
-# needs it. It is 6 MB, well below GitHub's 100 MB file limit.
-# Other large model files (alternative checkpoints) are ignored.
-backend/weights/*.pth
-# Allow best.pt explicitly:
+# Only the deployed best.pt (and its README) belong in git: best.pt is ~6 MB,
+# well under GitHub's 100 MB limit, and the deploy platform needs it at build
+# time. Any other/larger checkpoints (alternative .pt / .pth / .onnx exports)
+# are ignored so they can't bloat the repo.
+# ---------------------------------------------------------------------------
+backend/weights/*
 !backend/weights/best.pt
+!backend/weights/README.md
 
-# Uploaded images at runtime
+# ---------------------------------------------------------------------------
+# Runtime upload storage (keep the empty folder, ignore its contents)
+# ---------------------------------------------------------------------------
 backend/uploads/*
 !backend/uploads/.gitkeep
 
-# Node / Vite
+# ---------------------------------------------------------------------------
+# Node / Vite / Vitest (React frontend)
+# ---------------------------------------------------------------------------
 node_modules/
 dist/
+dist-ssr/
 .vite/
+coverage/
+*.local
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
 *.log
 npm-debug.log*
 
-# IDE
+# ---------------------------------------------------------------------------
+# Environment files (.env.example is committed as the template)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Editor / OS
+# ---------------------------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 .DS_Store
-
-# Environment files
-.env
-.env.local
-
-# Docker
-*.pid
+Thumbs.db

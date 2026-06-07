@@ -97,7 +97,7 @@ SizeEstimator(camera_height_mm=1200)
 Step 1 above uses H = 1200    ← every diameter in the response shifts
 ```
 
-The Settings page validates the input to `100 mm < H < 5000 mm`
+The Settings page validates the input to `100 mm ≤ H ≤ 5000 mm`
 before it's accepted. Values outside that range are silently reset to
 the last good value — so you can't crash the math by typing `0`.
 
