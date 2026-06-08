@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/health")
 def health(request: Request, response: Response):
-"""Liveness + model check, used by the platform healthcheck.
+    """Liveness + model check, used by the platform healthcheck.
 
     Returns 503 when the model isn't loaded so load balancers see the
     degraded state. Kept cheap (no inference, no disk I/O) to stay within
