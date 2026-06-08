@@ -142,7 +142,7 @@ async def detect_broccoli(
     uploader: ImageUploader = Depends(get_uploader),
     size_estimator: SizeEstimator = Depends(get_size_estimator),
 ):
-"""Run broccoli crown detection on an uploaded image.
+    """Run broccoli crown detection on an uploaded image.
 
     Pipeline: save → detect → leaf filter → size estimate → annotate → respond.
     """
