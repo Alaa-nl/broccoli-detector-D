@@ -5,6 +5,7 @@
 const ENDPOINTS = {
   detect: '/api/detect',
   health: '/api/health',
+  metadata: '/api/metadata',
 };
 
 // Thrown for any non-ok HTTP response. Carries the status and the server's
@@ -62,6 +63,15 @@ export function detectImage(formData, { signal } = {}) {
     signal,
     context: 'detect',
   });
+}
+
+// Fetch the app/model/inference metadata (the model-registry view). Unlike
+// /health below, /metadata only returns 200 on success, so the shared
+// request() ok-check is the right path: any non-ok response is a real
+// failure, and callers treat it as "metadata unavailable" and fall back to
+// their baked-in constants.
+export function getMetadata({ signal } = {}) {
+  return request(ENDPOINTS.metadata, { signal, context: 'metadata' });
 }
 
 // Fetch the backend health summary. Unlike detect, /health intentionally

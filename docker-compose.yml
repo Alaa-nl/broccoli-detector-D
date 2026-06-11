@@ -71,3 +71,9 @@ services:
         limits:
           cpus: "0.5"
           memory: 128m
+
+# Fixed name (instead of the auto-derived one) so the optional monitoring stack
+# in monitoring/ can attach to this network and reach "backend:8000".
+networks:
+  default:
+    name: broccoli-net

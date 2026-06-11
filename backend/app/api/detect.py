@@ -24,6 +24,7 @@ from app.models.schemas import (
     CrownDetection,
     DetectionResponse,
 )
+from app.services import metrics
 from app.services.annotator import draw_detections
 from app.services.detection_filters import filter_by_aspect_ratio
 from app.services.rate_limiter import RateLimiter
@@ -48,8 +49,14 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
     """
     expected = os.getenv("API_KEY")
     if not expected:
-        return 
-    if x_api_key is None or not secrets.compare_digest(x_api_key, expected):
+        return
+    # Compare as bytes: compare_digest raises TypeError on non-ASCII *strings*
+    # (and headers arrive latin-1-decoded), so a key like "ké" would 500
+    # instead of 401. Encoding first turns any weird header into a plain
+    # failed match.
+    if x_api_key is None or not secrets.compare_digest(
+        x_api_key.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API key.",
@@ -226,6 +233,17 @@ async def detect_broccoli(
         "conf=%.2f camera_height_mm=%.0f inference_ms=%.1f",
         image_id, img_width, img_height, len(crown_models), num_filtered,
         conf_threshold, size_estimator.camera_height_mm, inference_time_ms,
+    )
+
+    # Functional ML metrics (confidence/size distributions, empty-result
+    # rate) - recorded only for completed detections, since a failed request
+    # says nothing about the model and HTTP metrics already count failures.
+    metrics.record_detection(
+        num_crowns=len(crown_models),
+        confidences=[crown.confidence for crown in crown_models],
+        diameters_mm=[crown.diameter_mm for crown in crown_models],
+        num_filtered=num_filtered,
+        inference_seconds=inference_time_ms / 1000.0,
     )
 
     return DetectionResponse(

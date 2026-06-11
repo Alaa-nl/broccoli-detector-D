@@ -61,7 +61,9 @@ def _get_float_env(name: str, default: float) -> float:
 # single source of truth for these paths (they used to be derived separately,
 # and inconsistently, in main.py and api/detect.py).
 _BACKEND_DIR = Path(__file__).parent.parent
-WEIGHTS_PATH = _BACKEND_DIR / "weights" / "best.pt"
+WEIGHTS_DIR = _BACKEND_DIR / "weights"
+WEIGHTS_PATH = WEIGHTS_DIR / "best.pt"
+MODEL_REGISTRY_PATH = WEIGHTS_DIR / "registry.json"
 UPLOAD_DIR = _BACKEND_DIR / "uploads"
 
 # --- Environment / API docs gating ---------------------------------------
@@ -95,6 +97,22 @@ EXPECTED_WEIGHTS_SHA256 = os.getenv("EXPECTED_WEIGHTS_SHA256")  # None if unset
 ALLOW_MISSING_WEIGHTS = os.getenv("ALLOW_MISSING_WEIGHTS", "").lower() in (
     "1", "true", "yes",
 )
+
+# --- Model versioning / remote weights ------------------------------------
+# Deployed weights are an immutable, versioned artifact. MODEL_VERSION picks
+# which registry entry (weights/registry.json) to load; MODEL_WEIGHTS_URL
+# (typically an Azure Blob SAS URL) lets a deployment pull that version at
+# startup when the file isn't on disk - so a model update or rollback is an
+# env change + restart, not an image rebuild.
+MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
+MODEL_WEIGHTS_URL = os.getenv("MODEL_WEIGHTS_URL")  # None = local file only
+MAX_WEIGHTS_DOWNLOAD_BYTES = 200 * 1024 * 1024  # backstop for a bad URL
+
+# --- App identity ----------------------------------------------------------
+# Surfaced by /api/metadata and the Prometheus app-info metric so a running
+# deployment can always be traced back to a code + model version.
+APP_VERSION = "1.0.0"
+GIT_SHA = os.getenv("GIT_SHA")  # stamped into the image by CI; None locally
 
 # --- Rate limiting (per client IP) ---------------------------------------
 RATE_LIMIT_MAX = _get_int_env("RATE_LIMIT_MAX", 10)

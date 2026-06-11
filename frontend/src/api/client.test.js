@@ -2,7 +2,7 @@
 // JSON parsing, error-message building (detail + request-id ref), and the
 // pass-through of AbortError.
 
-import { detectImage, getHealth, ApiError } from './client.js';
+import { detectImage, getHealth, getMetadata, ApiError } from './client.js';
 
 // Build a minimal fetch Response stand-in.
 function fakeResponse(body, { ok = true, status = 200, headers = {} } = {}) {
@@ -64,6 +64,30 @@ describe('detectImage', () => {
     await expect(detectImage(new FormData())).rejects.toMatchObject({
       name: 'AbortError',
     });
+  });
+});
+
+describe('getMetadata', () => {
+  it('returns parsed JSON on a successful response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(fakeResponse({ model: { version: 'v1.0.0' } })),
+    );
+
+    await expect(getMetadata()).resolves.toEqual({
+      model: { version: 'v1.0.0' },
+    });
+  });
+
+  it('throws an ApiError on a non-ok response (callers fall back to constants)', async () => {
+    // Unlike /health, a non-200 from /metadata carries no meaningful body,
+    // so it goes through the shared ok-check and surfaces as a failure.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(fakeResponse({}, { ok: false, status: 503 })),
+    );
+
+    await expect(getMetadata()).rejects.toBeInstanceOf(ApiError);
   });
 });
 

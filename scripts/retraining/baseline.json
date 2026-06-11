@@ -1,0 +1,8 @@
+{
+  "_comment": "Seed values, NOT production truth. mean_confidence and empty_detection_rate come from the Deliverable B test-set evaluation; diameter_p50_mm is the worked example in docs/size-estimation.md (a typical medium crown at the default 1 m camera height). After the first healthy production window (a week or so of normal field traffic), re-capture all three from Prometheus and overwrite this file - the queries to run are in docs/retraining.md. Until then, drift alerts compare field behaviour against lab numbers, so treat them as advisory.",
+  "captured": "2026-06-11",
+  "window": "manual baseline from Deliverable B test set",
+  "mean_confidence": 0.80,
+  "diameter_p50_mm": 124.0,
+  "empty_detection_rate": 0.05
+}

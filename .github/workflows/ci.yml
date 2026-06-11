@@ -1,0 +1,91 @@
+# CI for the BroccoliDetect course project (Inholland "Model Deployment",
+# team B4).
+#
+# This is the fast feedback loop: it runs on every push to the working
+# branches and on PRs to main, and it never touches a registry. Publishing
+# the image to Azure happens in the separate deploy-acr.yml workflow, which
+# only fires on pushes to main and is itself gated on these same tests —
+# nothing is built or deployed before the tests pass.
+name: "B4 BroccoliDetect - CI"
+
+on:
+  push:
+    branches: [main, ml-devops]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch supersedes the running CI, so cancel the
+# stale run instead of letting it queue behind on the shared runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# CI only reads the repo; it has no business writing to it.
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          # Both requirements files shape the test environment, so a change
+          # to either one must invalidate the pip cache.
+          cache-dependency-path: backend/requirements*.txt
+
+      # The CPU wheel index keeps torch small enough for the runner; without
+      # it pip resolves the multi-GB CUDA build, which the tests don't need.
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements-dev.txt
+
+      - name: Run backend tests
+        run: python -m pytest -q
+        working-directory: backend
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci (not install) so the run is reproducible from the lockfile
+      # and fails loudly if the lockfile drifted from package.json.
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm test
+        working-directory: frontend
+
+  # Proves the deployment artifact still builds — Dockerfile.azure is the
+  # image we actually ship to Azure, so a broken build must fail CI even when
+  # all tests pass. No push here: CI stays side-effect free. Runs in parallel
+  # with the test jobs so a Dockerfile breakage is reported without waiting
+  # on the test suites.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GIT_SHA is baked into the image so /api/metadata and the
+      # broccoli_app_info metric can report which commit is running.
+      - name: Build deployment image (no push)
+        run: >
+          docker build
+          -f Dockerfile.azure
+          --build-arg GIT_SHA=${{ github.sha }}
+          -t broccoli-detect:ci
+          .

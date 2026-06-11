@@ -1,0 +1,27 @@
+{
+  "about": "Dataset registry for BroccoliDetect. Each entry pins one immutable dataset version stored in the team's Azure Blob container, so every model version in backend/weights/registry.json can point back to the exact images it was trained and evaluated on. See data/README.md for the add-a-version procedure.",
+  "versions": [
+    {
+      "version": "broccoli-rgb-v1",
+      "description": "RGB field images from Deliverable B: the RGB channel of the original RGB-D capture, annotated with broccoli crown bounding boxes.",
+      "source": "Inholland Robotics | Smart Farming professorship",
+      "storage": {
+        "account": "<team-storage-account>",
+        "container": "datasets",
+        "blob": "broccoli-rgb-v1.zip",
+        "url": "https://<team-storage-account>.blob.core.windows.net/datasets/broccoli-rgb-v1.zip"
+      },
+      "archive_sha256": null,
+      "num_images": null,
+      "splits": {
+        "test": 27,
+        "train": null,
+        "val": null
+      },
+      "annotation_format": "YOLO txt",
+      "used_by_models": ["v1.0.0"],
+      "created": "2025-11",
+      "notes": "The null fields are unknown until the dataset is archived, because the source images live in the Deliverable B training repo, not here. Only the 27-image test split is certain today. When zipping the dataset, run scripts/data/make_manifest.py (directory mode for the per-file checksums, --archive mode for the zip digest), then fill in archive_sha256, num_images, and the train/val split sizes, and replace the <team-storage-account> placeholder with the real account name."
+    }
+  ]
+}

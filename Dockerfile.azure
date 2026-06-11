@@ -1,0 +1,104 @@
+# Single-container image for the Azure deployment.
+#
+# The course rule is one deployment per team — one API endpoint, one model —
+# so instead of the two-container compose setup we ship ONE container that
+# runs both nginx (serving the built React app, proxying /api/ and /uploads/
+# to the backend, injecting the X-API-Key header server-side) and uvicorn.
+# uvicorn binds to loopback only, so the security architecture is identical
+# to the two-container setup: the browser can never reach the API directly
+# or learn the key; everything goes through nginx.
+#
+# Build from the repo root:  docker build -f Dockerfile.azure .
+
+# --- Stage 1: build the frontend ---
+# Mirrors frontend/Dockerfile: install dependencies first from the lockfile
+# (cached layer, reproducible via `npm ci`), then copy the source and build.
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: backend + nginx ---
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# libgl1/libglib2.0-0 are the OpenCV/Pillow system deps (same as the backend
+# image). nginx serves the frontend and proxies the API; gettext-base
+# provides envsubst, which the official nginx image ships but plain Debian
+# nginx does not — start.sh uses it to render the config template.
+# Debian's nginx package enables a default site on :80 that would shadow our
+# server block, so remove it; our rendered config lands in
+# /etc/nginx/conf.d/default.conf at startup instead.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx \
+    gettext-base \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
+
+# Copy the requirements file first so Docker caches the (heavy) pip install
+# layer when only the app code changes — same rationale as backend/Dockerfile.
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.txt
+
+# Copy the rest of the backend code (including the weights folder).
+COPY backend/ .
+
+# Make sure the uploads folder exists.
+RUN mkdir -p uploads
+
+# The built frontend goes where the nginx template's `root` points
+# (/usr/share/nginx/html — the official-image default the template assumes).
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+
+# Reuse the SAME nginx template as the two-container setup rather than
+# forking it: single source of truth, so proxy rules, security headers and
+# timeouts cannot drift between the compose and Azure deployments. start.sh
+# renders it with envsubst, standing in for the official nginx image's
+# entrypoint (which this Debian-based image doesn't have).
+COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
+
+COPY deploy/azure/start.sh /start.sh
+RUN chmod +x /start.sh
+
+# Non-root user for the Python process, same uid as the backend image.
+# start.sh drops uvicorn to appuser (it parses untrusted images and loads
+# model weights, so it must not run as root); /app is chown'd after the code
+# is in place so appuser can read the weights and write annotated uploads.
+# The nginx master stays root — like the official nginx image — so it can
+# bind port 80 and write its /var/log + /var/lib dirs; its workers run as
+# the unprivileged www-data per Debian's nginx.conf.
+RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
+
+# CI stamps the image with the commit it was built from; the backend surfaces
+# it via /api/metadata so a running deployment can be traced back to a commit.
+ARG GIT_SHA=""
+ENV GIT_SHA=${GIT_SHA}
+
+# Defaults so the nginx template renders for the combined container: the
+# upstream is the loopback uvicorn. The resolver directive is never consulted
+# for a literal-IP upstream, but nginx still requires a valid value to parse
+# the config, so keep the same public-DNS default as the frontend image.
+ENV BACKEND_SCHEME=http \
+    BACKEND_HOST=127.0.0.1 \
+    BACKEND_PORT=8000 \
+    DNS_RESOLVER="1.1.1.1 1.0.0.1"
+
+EXPOSE 80
+
+# Same stdlib-urllib probe as backend/Dockerfile, but aimed at nginx on :80
+# so it exercises the full proxy chain (nginx -> loopback uvicorn), not just
+# the API process. The start-period is generous because startup may include
+# downloading weights (MODEL_WEIGHTS_URL) on top of loading the model.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost/api/health', timeout=3)"]
+
+CMD ["/start.sh"]

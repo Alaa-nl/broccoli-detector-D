@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Moon, Sun, RotateCcw, Ruler, Target, Leaf } from 'lucide-react';
-import { getHealth } from '../api/client';
+import { getHealth, getMetadata } from '../api/client';
 import { MODEL_INFO } from '../constants/model.js';
 
 // Give up on the health check after this long so it can't sit on
@@ -37,11 +37,18 @@ export default function Settings({
 
   // Health info from the backend.
   const [health, setHealth] = useState(null);
+  // Live model metadata from /api/metadata - the single source of truth for
+  // the model facts below. Null until loaded, and it stays null on any
+  // failure: that null is the signal to fall back to the MODEL_INFO
+  // constants, so the card still renders something useful offline.
+  const [meta, setMeta] = useState(null);
 
   useEffect(() => {
     // Abort on a timeout (report unreachable) or on unmount (stay silent so
     // we don't set state on a gone component). `timedOut` separates the two,
-    // since both surface as an AbortError.
+    // since both surface as an AbortError. One controller and one timer
+    // cover both requests - they go to the same backend, so one deadline
+    // and one unmount-abort are enough.
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -49,7 +56,7 @@ export default function Settings({
       controller.abort();
     }, HEALTH_TIMEOUT_MS);
 
-    getHealth({ signal: controller.signal })
+    const healthDone = getHealth({ signal: controller.signal })
       .then((data) => setHealth(data))
       .catch((err) => {
         // Ignore an unmount-abort; a real timeout or network error still
@@ -57,8 +64,18 @@ export default function Settings({
         if (err.name !== 'AbortError' || timedOut) {
           setHealth({ status: 'unreachable', model_loaded: false });
         }
-      })
-      .finally(() => clearTimeout(timer));
+      });
+
+    const metaDone = getMetadata({ signal: controller.signal })
+      .then((data) => setMeta(data))
+      // Any failure (abort included) just leaves `meta` null, which flips
+      // the model card onto its constant fallback - nothing to report.
+      .catch(() => {});
+
+    // Clear the timer only once both requests have settled, so an early
+    // health answer can't cancel the deadline for a still-pending metadata
+    // request (or vice versa).
+    Promise.all([healthDone, metaDone]).then(() => clearTimeout(timer));
 
     return () => {
       clearTimeout(timer);
@@ -258,15 +275,54 @@ export default function Settings({
       </button>
 
       {/* Model info card: a normal card (light in light mode, dark in dark
-          mode), consistent with the other sections above. */}
+          mode), consistent with the other sections above. Each row prefers
+          the live /api/metadata value (so the UI shows what the backend is
+          actually serving) and falls back to the MODEL_INFO constant when
+          the backend is unreachable or hasn't filled in that field. */}
       <section className="card p-5">
         <h2 className="font-semibold mb-3">Model Information</h2>
         <dl className="text-sm space-y-1">
-          <Row label="Architecture" value={MODEL_INFO.architecture} />
-          <Row label="Parameters" value={MODEL_INFO.parameters} />
-          <Row label="Training mAP@0.5" value={MODEL_INFO.trainingMap} />
-          <Row label="Mean IoU" value={MODEL_INFO.meanIoU} />
-          <Row label="Weights" value={MODEL_INFO.weights} />
+          {/* The version has no constant fallback on purpose: a baked-in
+              version would claim certainty we don't have when offline. */}
+          <Row label="Model version" value={meta?.model?.version ?? 'unknown'} />
+          <Row
+            label="Architecture"
+            value={meta?.model?.architecture ?? MODEL_INFO.architecture}
+          />
+          <Row
+            label="Parameters"
+            value={meta?.model?.parameters ?? MODEL_INFO.parameters}
+          />
+          {/* Metrics arrive as numbers; String() keeps them rendering the
+              same way the string constants always have. */}
+          <Row
+            label="Training mAP@0.5"
+            value={
+              meta?.model?.metrics?.map50 != null
+                ? String(meta.model.metrics.map50)
+                : MODEL_INFO.trainingMap
+            }
+          />
+          <Row
+            label="Mean IoU"
+            value={
+              meta?.model?.metrics?.mean_iou != null
+                ? String(meta.model.metrics.mean_iou)
+                : MODEL_INFO.meanIoU
+            }
+          />
+          {/* When the backend knows its weights file, also surface whether
+              the checksum verification passed. */}
+          <Row
+            label="Weights"
+            value={
+              meta?.model?.weights_file
+                ? `${meta.model.weights_file} (${
+                    meta.model.verified ? 'verified' : 'unverified'
+                  })`
+                : MODEL_INFO.weights
+            }
+          />
           <Row
             label="Server status"
             value={

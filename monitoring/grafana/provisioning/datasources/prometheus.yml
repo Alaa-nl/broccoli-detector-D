@@ -1,0 +1,14 @@
+# Provisioned datasource so a fresh Grafana container is usable immediately,
+# with no manual "add datasource" step. The fixed uid is referenced by the
+# dashboard JSON, which keeps panel->datasource wiring stable across restarts.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    # Compose service name - Grafana and Prometheus share this stack's network.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

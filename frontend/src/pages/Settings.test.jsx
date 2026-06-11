@@ -1,4 +1,5 @@
-// Tests for the Settings page's health-check abort behaviour.
+// Tests for the Settings page's health/metadata fetching and abort
+// behaviour, plus the live-vs-fallback model info rows.
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -16,6 +17,20 @@ const baseProps = {
   aspectRatioFilter: true,
   setAspectRatioFilter: noop,
 };
+
+// Mounting Settings now fires TWO requests (health + metadata), so a single
+// mockResolvedValue would feed the same body to both. Route the stub by URL
+// instead, defaulting each endpoint to a never-resolving promise so a test
+// only has to script the endpoint it actually cares about.
+const never = () => new Promise(() => {});
+function stubFetchRoutes({ health = never, metadata = never } = {}) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url, opts) =>
+      url === '/api/metadata' ? metadata(url, opts) : health(url, opts),
+    ),
+  );
+}
 
 describe('Settings health check', () => {
   it('aborts the in-flight health request on unmount', () => {
@@ -182,6 +197,60 @@ describe('Settings camera-height input', () => {
     unmount();
 
     expect(setCameraHeight).not.toHaveBeenCalled();
+  });
+});
+
+describe('Settings model metadata', () => {
+  it('renders live registry values when /api/metadata succeeds', async () => {
+    // Distinctive server values prove the live data wins over the constants.
+    stubFetchRoutes({
+      metadata: () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({
+            model: {
+              version: 'v9.9.9',
+              architecture: 'YOLOv8x (server)',
+              parameters: '68M',
+              weights_file: 'model-v9.9.9.pt',
+              verified: true,
+              metrics: { map50: 0.5, mean_iou: 0.4, test_set_size: 10 },
+            },
+          }),
+        }),
+    });
+
+    render(<Settings {...baseProps} />);
+
+    expect(await screen.findByText('v9.9.9')).toBeInTheDocument();
+    expect(screen.getByText('YOLOv8x (server)')).toBeInTheDocument();
+    expect(screen.getByText('0.5')).toBeInTheDocument();
+    expect(
+      screen.getByText(/model-v9\.9\.9\.pt \(verified\)/),
+    ).toBeInTheDocument();
+    // The constants are replaced, not rendered alongside the live values.
+    expect(screen.queryByText(MODEL_INFO.architecture)).not.toBeInTheDocument();
+  });
+
+  it('falls back to MODEL_INFO constants when /api/metadata fails', async () => {
+    // The client logs the failure in dev; keep the test output clean.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubFetchRoutes({
+      metadata: () =>
+        Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: { get: () => null },
+          json: async () => ({}),
+        }),
+    });
+
+    render(<Settings {...baseProps} />);
+
+    // Version has no baked-in fallback on purpose - it reads 'unknown'.
+    expect(await screen.findByText('unknown')).toBeInTheDocument();
+    expect(screen.getByText(MODEL_INFO.architecture)).toBeInTheDocument();
+    expect(screen.getByText(MODEL_INFO.weights)).toBeInTheDocument();
   });
 });
 

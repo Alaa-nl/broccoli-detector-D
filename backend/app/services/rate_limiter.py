@@ -74,7 +74,9 @@ class RateLimiter:
         """
         now = time.monotonic()
         with self._lock:
-            hits = self._hits[key]
+            # .get, not [key]: this is a pure query, and the defaultdict
+            # would otherwise grow an empty deque for every key probed.
+            hits = self._hits.get(key)
             if not hits:
                 return 1
             seconds = self.window_seconds - (now - hits[0])
