@@ -12,8 +12,8 @@
 # to main could ship an image whose tests ran against different code (or never
 # ran at all). Here nothing reaches ACR unless THIS commit's tests pass first.
 #
-# The final hop — pointing the Azure Container App at the new image — stays a
-# documented manual `az containerapp update` (printed in the run summary).
+# The final hop — pointing the App Service webapp at the new image — stays a
+# documented manual step (`make deploy`, printed in the run summary).
 # Automating it would require a service principal with rights on the resource
 # group, which the course Azure tenant does not let students create.
 name: "B4 BroccoliDetect - Build & Push to ACR"
@@ -116,11 +116,14 @@ jobs:
             echo '- `${{ secrets.ACR_LOGIN_SERVER }}/broccoli-detect:latest`'
             echo '- `${{ secrets.ACR_LOGIN_SERVER }}/broccoli-detect:sha-${{ github.sha }}`'
             echo ""
-            echo "### Manual redeploy (fill in your team's names)"
+            echo "### Manual redeploy (App Service; fill in your team's names)"
             echo ""
             echo '```'
-            echo "az containerapp update --name <containerapp-name> --resource-group <resource-group> --image <acr-login-server>/broccoli-detect:sha-${{ github.sha }}"
+            echo "az webapp config container set --name <webapp-name> --resource-group <resource-group> --container-image-name <acr-login-server>/broccoli-detect:sha-${{ github.sha }}"
+            echo "az webapp restart --name <webapp-name> --resource-group <resource-group>"
             echo '```'
             echo ""
-            echo "_This last step is manual: full end-to-end automation needs a service principal with rights on the resource group, which the course Azure tenant does not grant._"
+            echo "With deploy/azure/azure.env filled in, both steps are: make deploy TAG=sha-${{ github.sha }}"
+            echo ""
+            echo "_(Container Apps alternative: make deploy-containerapp. This last step is manual: full end-to-end automation needs a service principal with rights on the resource group, which the course Azure tenant does not grant.)_"
           } >> "$GITHUB_STEP_SUMMARY"
