@@ -16,6 +16,7 @@
 # and the command line (e.g. `make TAG=v2 build`) both win over these.
 ACR_NAME       ?= teamb4broccoliacr
 RESOURCE_GROUP ?=
+WEBAPP         ?= teamb4-broccoli-api
 CONTAINER_APP  ?= teamb4-broccoli-api
 IMAGE          ?= broccoli-detect
 TAG            ?= latest
@@ -30,7 +31,7 @@ DRIFT_API_URL  ?= http://host.docker.internal:8080/api/detect
 .DEFAULT_GOAL := help
 
 .PHONY: help test test-backend test-frontend build run acr-login push deploy \
-        monitor-up monitor-down drift check-retrain
+        deploy-containerapp monitor-up monitor-down drift check-retrain
 
 help: ## Show this help (the default target)
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-15s %s\n", $$1, $$2}'
@@ -77,7 +78,23 @@ push: ## Tag the local image for ACR and push it (run `make acr-login` first)
 # Kept as a Make target rather than a CI job on purpose: the course tenant
 # does not allow a service principal with rights on the resource group, so
 # this last hop is manual. CI pushes the image; a team member runs this.
-deploy: ## Point the Azure Container App at the pushed image (manual step)
+#
+# The app runs on Azure App Service (Web App for Containers). Pointing the
+# webapp at a tag and restarting makes it re-pull from ACR, so TAG=latest
+# redeploys the newest CI build and TAG=sha-<commit> rolls back to an exact
+# older version.
+deploy: ## Point the App Service webapp at $(IMAGE):$(TAG) and restart it
+	@test -n "$(RESOURCE_GROUP)" || { echo "RESOURCE_GROUP is empty - copy deploy/azure/azure.env.example to deploy/azure/azure.env and fill it in"; exit 1; }
+	az webapp config container set --name $(WEBAPP) --resource-group $(RESOURCE_GROUP) \
+		--container-image-name $(ACR_NAME).azurecr.io/$(IMAGE):$(TAG)
+	az webapp restart --name $(WEBAPP) --resource-group $(RESOURCE_GROUP)
+
+# Alternative target platform (also course-approved). We originally targeted
+# Container Apps, but environment creation in westeurope was refused with
+# AKSCapacityHeavyUsage (a regional capacity outage on the AKS infrastructure
+# backing it); the identical image deploys to App Service unchanged, so the
+# app runs there. Kept for when capacity returns.
+deploy-containerapp: ## Alternative: point an Azure Container App at $(IMAGE):$(TAG)
 	@test -n "$(RESOURCE_GROUP)" || { echo "RESOURCE_GROUP is empty - copy deploy/azure/azure.env.example to deploy/azure/azure.env and fill it in"; exit 1; }
 	az containerapp update --name $(CONTAINER_APP) --resource-group $(RESOURCE_GROUP) \
 		--image $(ACR_NAME).azurecr.io/$(IMAGE):$(TAG)

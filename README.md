@@ -488,13 +488,17 @@ make test-frontend       # hermetic: runs in a node:20-alpine container
 
 ## Deployment
 
-The cloud target is **Azure Container Apps**, deployed as a single combined
-container ([`Dockerfile.azure`](Dockerfile.azure)): nginx serves the built
-React app and proxies `/api/`+`/uploads/` to a uvicorn bound to loopback
-inside the same container — one published port, the exact trust boundary of
-the two-container setup (the API key nginx injects cannot be bypassed because
-uvicorn is unreachable from outside). The full step-by-step runbook, including
-every Azure command, secrets setup, and the blob-storage model rollout, is in
+The cloud target is **Azure App Service (Web App for Containers)**, deployed
+as a single combined container ([`Dockerfile.azure`](Dockerfile.azure)):
+nginx serves the built React app and proxies `/api/`+`/uploads/` to a uvicorn
+bound to loopback inside the same container — one published port, the exact
+trust boundary of the two-container setup (the API key nginx injects cannot
+be bypassed because uvicorn is unreachable from outside). Azure Container
+Apps is the documented alternative platform: it was the original target, but
+a regional `AKSCapacityHeavyUsage` outage blocked environment creation at
+rollout time, and the same image runs on App Service unchanged. The full
+step-by-step runbook, including every Azure command, secrets setup, and the
+blob-storage model rollout, is in
 [`docs/deployment-azure.md`](docs/deployment-azure.md).
 
 **CI/CD** ([`.github/workflows/`](.github/workflows/)):
