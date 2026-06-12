@@ -6,10 +6,10 @@
       "description": "RGB field images from Deliverable B: the RGB channel of the original RGB-D capture, annotated with broccoli crown bounding boxes.",
       "source": "Inholland Robotics | Smart Farming professorship",
       "storage": {
-        "account": "<team-storage-account>",
+        "account": "teamb4broccolist",
         "container": "datasets",
         "blob": "broccoli-rgb-v1.zip",
-        "url": "https://<team-storage-account>.blob.core.windows.net/datasets/broccoli-rgb-v1.zip"
+        "url": "https://teamb4broccolist.blob.core.windows.net/datasets/broccoli-rgb-v1.zip"
       },
       "archive_sha256": "99568cde53abfdbde7923b69df5dbd947931c03b71fa8a5d36f8900f6190c076",
       "num_images": 171,
