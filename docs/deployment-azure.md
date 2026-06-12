@@ -4,8 +4,16 @@ How BroccoliDetect gets onto Azure, step by step. The deployment unit is the
 **single combined container** built by [`Dockerfile.azure`](../Dockerfile.azure)
 (nginx serving the React UI + proxying to a loopback uvicorn) — one container
 app, one model, per the course rules. CI builds and pushes the image; the last
-hop into the Container App is a documented manual command (the course tenant
-does not grant service principals with resource-group rights).
+hop onto the platform is a documented manual command (the course tenant does
+not grant service principals with resource-group rights).
+
+The app runs on **Azure App Service (Web App for Containers)**. We originally
+targeted Azure Container Apps, but at rollout time environment creation in
+westeurope was refused with `AKSCapacityHeavyUsage` — a regional capacity
+outage on the AKS infrastructure that backs Container Apps. Because the
+deployment artifact is a self-contained image, the identical container
+deploys to App Service (the other course-approved service, same region)
+with zero changes; §3 documents both paths.
 
 Everything here uses the `az` CLI on macOS/Linux (bash/zsh). All names follow
 the `teamXX-service-name` convention and live in the team's assigned resource
@@ -62,7 +70,56 @@ First image without waiting for CI (optional):
 make build acr-login push
 ```
 
-## 3. One-time: Container Apps environment + app
+## 3. One-time: create the app
+
+Shared notes for both platforms:
+
+- The container listens on **port 80** (nginx inside the combined image).
+- **`API_KEY`** is stored as a platform secret/app setting, never in the
+  repo. Inside the container, nginx injects it on proxied `/api/` calls, and
+  uvicorn (loopback-only) enforces it — so the public URL serves the UI while
+  the API itself is key-protected. Keep the key alphanumeric
+  (`openssl rand -hex 32`): it is substituted into the nginx config, where
+  quotes or semicolons would break the rendered file.
+- **`DEPLOY_ENV=production`** hides `/docs` and makes the weights integrity
+  check mandatory (the hash comes from `backend/weights/registry.json`;
+  set `EXPECTED_WEIGHTS_SHA256` explicitly only to override it).
+
+### Option A — App Service (the deployed platform)
+
+```bash
+az appservice plan create --name teamb4-broccoli-plan --resource-group "$RG" \
+  --location westeurope --is-linux --sku B1
+
+az webapp create --name teamb4-broccoli-api --resource-group "$RG" \
+  --plan teamb4-broccoli-plan \
+  --container-image-name teamb4broccoliacr.azurecr.io/broccoli-detect:latest
+
+az webapp config container set --name teamb4-broccoli-api --resource-group "$RG" \
+  --container-image-name teamb4broccoliacr.azurecr.io/broccoli-detect:latest \
+  --container-registry-url https://teamb4broccoliacr.azurecr.io \
+  --container-registry-user teamb4broccoliacr \
+  --container-registry-password "$(az acr credential show --name teamb4broccoliacr --query 'passwords[0].value' -o tsv)"
+
+az webapp config appsettings set --name teamb4-broccoli-api --resource-group "$RG" --settings \
+  WEBSITES_PORT=80 API_KEY=$(openssl rand -hex 32) DEPLOY_ENV=production MODEL_VERSION=v1.0.0
+
+az webapp log config --name teamb4-broccoli-api --resource-group "$RG" \
+  --docker-container-logging filesystem
+az webapp restart --name teamb4-broccoli-api --resource-group "$RG"
+```
+
+URL: `https://teamb4-broccoli-api.azurewebsites.net`. The **first** start
+pulls the ~2 GB image and loads the model — allow 3–5 minutes. B1 (1.75 GB
+RAM, 1 core) is the smallest tier that fits torch comfortably. Live logs:
+`az webapp log tail --name teamb4-broccoli-api --resource-group "$RG"`.
+
+### Option B — Container Apps (alternative; capacity-dependent)
+
+At rollout time this failed with `AKSCapacityHeavyUsage` in westeurope; the
+commands are kept for when regional capacity returns. After any "failed"
+create, check `az containerapp env show … --query properties.provisioningState`
+before reacting — the CLI sometimes reports failure while the resource lands.
 
 ```bash
 az containerapp env create --name teamb4-broccoli-env \
@@ -78,40 +135,25 @@ az containerapp create --name teamb4-broccoli-api \
   --env-vars API_KEY=secretref:api-key DEPLOY_ENV=production MODEL_VERSION=v1.0.0
 ```
 
-Notes:
-
-- **`--target-port 80`** — nginx's port inside the combined container.
-- **`API_KEY`** is stored as a Container App secret, never in the repo. Inside
-  the container, nginx injects it on proxied `/api/` calls, and uvicorn
-  (loopback-only) enforces it — so the public URL serves the UI while the API
-  itself is key-protected. Keep the key alphanumeric (`openssl rand -hex 32`):
-  it is substituted into the nginx config, where quotes or semicolons would
-  break the rendered file.
-- **`DEPLOY_ENV=production`** hides `/docs` and makes the weights integrity
-  check mandatory (the hash comes from `backend/weights/registry.json`;
-  set `EXPECTED_WEIGHTS_SHA256` explicitly only to override it).
-- Resources: start with the defaults (0.5 vCPU / 1 Gi — course rule: small
-  settings). CPU inference is slow but works; if the app gets OOM-killed at
-  startup, raise to `--cpu 1 --memory 2Gi` and document the constraint.
-- Get the public URL: `az containerapp show --name teamb4-broccoli-api
-  --resource-group "$RG" --query properties.configuration.ingress.fqdn -o tsv`
+Resources: defaults (0.5 vCPU / 1 Gi) per the course's small-settings rule;
+raise to `--cpu 1 --memory 2Gi` only if the app is OOM-killed at startup.
 
 ## 4. Releasing a new version (the lifecycle loop)
 
 1. Merge / push to `main` → the deploy workflow tests, builds, and pushes
-   `:sha-<commit>` to ACR. The run summary shows the exact command for step 2.
+   `:sha-<commit>` to ACR. The run summary shows the redeploy step.
 2. Point the app at it (the one manual step):
 
 ```bash
-az containerapp update --name teamb4-broccoli-api --resource-group "$RG" \
-  --image teamb4broccoliacr.azurecr.io/broccoli-detect:sha-<commit>
+make deploy TAG=sha-<commit>      # = az webapp config container set + restart
 ```
 
-   or, with `deploy/azure/azure.env` filled in: `make deploy TAG=sha-<commit>`.
+   (`TAG=latest` deploys the newest CI build; on Container Apps the
+   equivalent is `make deploy-containerapp TAG=…`.)
 
-3. Verify: open `https://<fqdn>/api/metadata` — `app.git_sha` must equal the
-   commit you deployed, `model.version`/`model.verified` describe the loaded
-   weights. **Rollback** is the same command with an older `sha-` tag.
+3. Verify: open `https://<public-url>/api/metadata` — `app.git_sha` must equal
+   the commit you deployed, `model.version`/`model.verified` describe the
+   loaded weights. **Rollback** is the same command with an older `sha-` tag.
 
 ## 5. Model weights in Blob Storage (update a model without rebuilding)
 
