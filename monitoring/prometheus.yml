@@ -1,0 +1,15 @@
+# Prometheus scrape config for the BroccoliDetect backend.
+#
+# 5s interval is deliberately aggressive for a demo: detections are sparse
+# (one per manual upload), so a coarser interval would make the functional
+# panels feel dead during a live walkthrough. In production 15-60s is plenty.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: broccoli-backend
+    metrics_path: /metrics
+    static_configs:
+      # Compose service name on broccoli-net; /metrics is unauthenticated and
+      # only reachable inside the Docker network or via the host port.
+      - targets: ["backend:8000"]

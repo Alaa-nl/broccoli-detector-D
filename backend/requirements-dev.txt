@@ -1,0 +1,5 @@
+# Test/CI-only dependencies for the backend. Installed on top of
+# requirements.txt in dev and CI; never installed into the runtime image.
+
+pytest==8.4.2
+httpx==0.27.2   # required by fastapi.testclient.TestClient

@@ -10,13 +10,15 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import config
-from app.api import detect, health
+from app.api import detect, health, metadata
+from app.services import model_store
 from app.services.detector import BroccoliDetector
+from app.services.metrics import MetricsMiddleware, render_metrics, set_app_info
 
 
 # Per-request id, shared via ContextVar so route, log filter, and middleware
@@ -245,9 +247,26 @@ class RequestIDMiddleware:
 async def lifespan(app: FastAPI):
     """Startup and shutdown handler for the FastAPI app."""
 
+    # Resolve MODEL_VERSION via the registry; downloads from
+    # MODEL_WEIGHTS_URL when the file isn't on disk (e.g. a new version
+    # rolled out as an env change, without rebuilding the image).
+    weights_path, weights_source = model_store.resolve_weights()
 
-    logger.info("Loading YOLOv8n model from: %s", config.WEIGHTS_PATH.name)
-    app.state.detector = BroccoliDetector(weights_path=str(config.WEIGHTS_PATH))
+    # Verification policy: an explicit env hash always wins; production and
+    # network-fetched weights must verify (registry hash); plain local dev
+    # keeps the old warn-and-skip behaviour so a freshly retrained best.pt
+    # doesn't block iteration before it's registered.
+    expected_sha = config.EXPECTED_WEIGHTS_SHA256
+    if expected_sha is None and (config.IS_PROD or weights_source == "remote"):
+        expected_sha = model_store.expected_sha256(config.MODEL_VERSION)
+
+    logger.info(
+        "Loading YOLOv8n model %s from: %s (source=%s)",
+        config.MODEL_VERSION, weights_path.name, weights_source,
+    )
+    app.state.detector = BroccoliDetector(
+        weights_path=str(weights_path), expected_sha256=expected_sha
+    )
     # Exposed on app.state to avoid circular imports from routes.
     app.state.upload_dir = config.UPLOAD_DIR
 
@@ -255,9 +274,32 @@ async def lifespan(app: FastAPI):
     # frontend devs run the UI without best.pt.
     if not app.state.detector.is_ready() and not config.ALLOW_MISSING_WEIGHTS:
         raise RuntimeError(
-            f"YOLO model failed to load from {config.WEIGHTS_PATH.name}. "
+            f"YOLO model failed to load from {weights_path.name}. "
             f"Set ALLOW_MISSING_WEIGHTS=1 to start without it (frontend dev only)."
         )
+
+    # Model card data for /api/metadata. The hash is computed once here
+    # (the file is ~6 MB) so the endpoint itself stays free of disk I/O.
+    app.state.model_meta = {
+        "version": config.MODEL_VERSION,
+        "source": weights_source,
+        "weights_file": weights_path.name if weights_path.exists() else None,
+        "weights_sha256": (
+            model_store.compute_sha256(weights_path)
+            if app.state.detector.is_ready() else None
+        ),
+        "verified": expected_sha is not None and app.state.detector.is_ready(),
+        "registry_entry": model_store.get_registry_entry(config.MODEL_VERSION),
+    }
+
+    # Stamp the instance identity onto the metrics so dashboards can tell
+    # which code + model version produced any given series.
+    set_app_info(
+        app_version=config.APP_VERSION,
+        model_version=config.MODEL_VERSION,
+        deploy_env=config.DEPLOY_ENV,
+        git_sha=config.GIT_SHA or "",
+    )
 
     if app.state.detector.is_ready():
         logger.info("Model loaded. API is ready.")
@@ -314,6 +356,10 @@ app.add_middleware(
 # Reject oversized request bodies before they are buffered.
 app.add_middleware(BodySizeLimitMiddleware, max_body_size=config.MAX_REQUEST_BODY_BYTES)
 
+# Count and time every request (Prometheus). Sits just inside RequestID so
+# even requests that crash before a response are recorded as 500s.
+app.add_middleware(MetricsMiddleware)
+
 # Added LAST = outermost middleware: runs first inbound and last outbound,
 # so X-Request-ID gets stamped on every response (including 413 and CORS).
 # Do not move.
@@ -322,7 +368,21 @@ app.add_middleware(RequestIDMiddleware)
 app.mount("/uploads", StaticFiles(directory=str(config.UPLOAD_DIR)), name="uploads")
 
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(metadata.router, prefix="/api", tags=["metadata"])
 app.include_router(detect.router, prefix="/api", tags=["detect"])
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    """Prometheus scrape endpoint.
+
+    Not proxied by nginx (which only forwards /api/ and /uploads/), so it
+    stays reachable only on the backend's own port - inside the compose
+    network for the local monitoring stack, and loopback-only in the
+    combined Azure container.
+    """
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
 
 
 @app.get("/")

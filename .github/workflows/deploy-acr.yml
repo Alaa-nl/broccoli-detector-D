@@ -1,0 +1,126 @@
+# Release pipeline for the BroccoliDetect course project (Inholland "Model
+# Deployment", team B4): build the deployment image and push it to the team's
+# Azure Container Registry.
+#
+# Fires on pushes to main (and manually via workflow_dispatch). The image is
+# tagged both :latest and :sha-<commit> so any deployed version traces back to
+# the exact commit, and a bad release can be rolled back by redeploying an
+# older sha tag.
+#
+# The test jobs below duplicate ci.yml ON PURPOSE: the deploy gate must be
+# self-contained. If this workflow trusted "CI passed at some point", a push
+# to main could ship an image whose tests ran against different code (or never
+# ran at all). Here nothing reaches ACR unless THIS commit's tests pass first.
+#
+# The final hop — pointing the Azure Container App at the new image — stays a
+# documented manual `az containerapp update` (printed in the run summary).
+# Automating it would require a service principal with rights on the resource
+# group, which the course Azure tenant does not let students create.
+name: "B4 BroccoliDetect - Build & Push to ACR"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          # Both requirements files shape the test environment, so a change
+          # to either one must invalidate the pip cache.
+          cache-dependency-path: backend/requirements*.txt
+
+      # The CPU wheel index keeps torch small enough for the runner; without
+      # it pip resolves the multi-GB CUDA build, which the tests don't need.
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements-dev.txt
+
+      - name: Run backend tests
+        run: python -m pytest -q
+        working-directory: backend
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci (not install) so the run is reproducible from the lockfile.
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm test
+        working-directory: frontend
+
+  build-and-push:
+    # Tests gate the push: no green tests on this commit, no image in ACR.
+    needs: [backend-tests, frontend-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Buildx provides the builder that build-push-action expects.
+      - uses: docker/setup-buildx-action@v3
+
+      # Registry credentials come from repository secrets (the ACR admin
+      # user). GitHub masks them in all logs and summaries.
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.azure
+          push: true
+          # GIT_SHA is baked into the image so /api/metadata and the
+          # broccoli_app_info metric report exactly which commit is running.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/broccoli-detect:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/broccoli-detect:sha-${{ github.sha }}
+
+      # Put everything the operator needs for the manual redeploy in the run
+      # summary. The registry host renders as *** because it is stored as a
+      # secret — substitute the team's ACR login server when copying.
+      - name: Write deployment summary
+        run: |
+          {
+            echo "## Image pushed to ACR"
+            echo ""
+            echo "Tags pushed (registry host is masked because it is a repo secret):"
+            echo ""
+            echo '- `${{ secrets.ACR_LOGIN_SERVER }}/broccoli-detect:latest`'
+            echo '- `${{ secrets.ACR_LOGIN_SERVER }}/broccoli-detect:sha-${{ github.sha }}`'
+            echo ""
+            echo "### Manual redeploy (fill in your team's names)"
+            echo ""
+            echo '```'
+            echo "az containerapp update --name <containerapp-name> --resource-group <resource-group> --image <acr-login-server>/broccoli-detect:sha-${{ github.sha }}"
+            echo '```'
+            echo ""
+            echo "_This last step is manual: full end-to-end automation needs a service principal with rights on the resource group, which the course Azure tenant does not grant._"
+          } >> "$GITHUB_STEP_SUMMARY"

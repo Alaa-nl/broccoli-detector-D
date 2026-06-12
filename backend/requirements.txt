@@ -24,3 +24,6 @@ numpy==1.26.4
 
 # Data validation (used by FastAPI).
 pydantic==2.9.2
+
+# Monitoring: exposes operational + functional ML metrics on /metrics.
+prometheus-client==0.20.0

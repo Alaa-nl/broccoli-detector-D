@@ -110,16 +110,21 @@ broccoli-detector-D/
 │   │   ├── config.py             # Single source of truth for all settings
 │   │   ├── api/
 │   │   │   ├── detect.py         # POST /api/detect (auth + rate limit + pipeline)
-│   │   │   └── health.py         # GET /api/health and /api/ready
+│   │   │   ├── health.py         # GET /api/health and /api/ready
+│   │   │   └── metadata.py       # GET /api/metadata (model card from the registry)
 │   │   ├── services/
 │   │   │   ├── detector.py       # YOLOv8n wrapper (load, integrity check, predict)
+│   │   │   ├── model_store.py    # Model registry + versioned/remote weights resolve
+│   │   │   ├── metrics.py        # Prometheus operational + functional ML metrics
 │   │   │   ├── uploader.py       # Upload validation + safe save
 │   │   │   ├── detection_filters.py  # Aspect-ratio (leaf) filter
 │   │   │   ├── size_estimator.py # Pinhole-camera mm conversion
 │   │   │   ├── annotator.py      # Draws boxes/labels on the result image
 │   │   │   └── rate_limiter.py   # In-memory sliding-window limiter
 │   │   └── models/schemas.py     # Pydantic request/response models
+│   ├── tests/                    # pytest suite (units, API contracts, model)
 │   ├── weights/best.pt           # Trained model (committed; ~6 MB)
+│   ├── weights/registry.json     # Model registry: version -> file/sha256/dataset/metrics
 │   ├── uploads/                  # Saved + annotated images (runtime, swept)
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -137,9 +142,21 @@ broccoli-detector-D/
 │   ├── nginx.conf.template       # Rendered at container start (envsubst)
 │   ├── vite.config.js            # Dev server + /api proxy
 │   └── package.json
-├── docs/size-estimation.md       # Deep dive on the mm conversion
+├── data/registry.json            # Dataset registry (versions, lineage to models)
+├── monitoring/                   # Prometheus + Grafana demo stack (provisioned dashboard)
+├── scripts/
+│   ├── data/                     # Dataset manifest + blob-upload tooling
+│   └── retraining/               # Drift simulation + retraining-trigger checks
+├── deploy/azure/                 # Combined-image entrypoint + Azure env template
+├── .github/workflows/            # CI + test-gated build-and-push to ACR
+├── docs/
+│   ├── size-estimation.md        # Deep dive on the mm conversion
+│   ├── deployment-azure.md       # Azure runbook (every command, step by step)
+│   └── retraining.md             # Retraining strategy, triggers, demo walkthrough
+├── Dockerfile.azure              # Single-container deployment image (nginx + uvicorn)
+├── Makefile                      # test / build / push / deploy / monitor / drift
 ├── docker-compose.yml            # Run both services together
-├── render.yaml                   # Render Blueprint (cloud deploy)
+├── render.yaml                   # Render Blueprint (legacy cloud deploy)
 ├── .env.example                  # Copy to .env; documents every backend var
 └── README.md                     # You are here
 ```
@@ -223,8 +240,11 @@ Environment-overridable variables are documented in
 | `UPLOAD_TTL_SECONDS` | `3600` | Delete saved images older than this. |
 | `UPLOAD_SWEEP_SECONDS` | `600` | How often the retention sweep runs. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
-| `EXPECTED_WEIGHTS_SHA256` | _(unset)_ | SHA-256 that `best.pt` is checked against before load. Optional in dev; **required when `DEPLOY_ENV=production`** (the server refuses to start without it). |
-| `ALLOW_MISSING_WEIGHTS` | _(unset)_ | `1` lets the server start without `best.pt` (frontend dev). |
+| `MODEL_VERSION` | `v1.0.0` | Which entry of the model registry ([`backend/weights/registry.json`](backend/weights/registry.json)) to load. Changing it (plus `MODEL_WEIGHTS_URL` for versions not baked into the image) rolls the model forward or back without a rebuild. |
+| `MODEL_WEIGHTS_URL` | _(unset)_ | HTTPS URL (e.g. an Azure Blob SAS URL) the backend downloads the weights from at startup when the file for `MODEL_VERSION` is not on disk. |
+| `EXPECTED_WEIGHTS_SHA256` | _(unset)_ | Explicit weights-hash pin; wins over the registry hash when set. Verification is enforced in production and for downloaded weights (the server refuses to start on a mismatch); plain local dev warns and skips. |
+| `ALLOW_MISSING_WEIGHTS` | _(unset)_ | `1` lets the server start without weights (frontend dev). |
+| `GIT_SHA` | _(unset)_ | Stamped into the image by CI; surfaced by `/api/metadata` and the metrics so a running deployment traces back to a commit. |
 
 Non-environment tunables (request/file size caps, confidence defaults and
 bounds, camera-height bounds, FOV, size-category thresholds) also live in
@@ -282,7 +302,7 @@ bounds, camera-height bounds, FOV, size-category thresholds) also live in
 - **Disk bounded.** A background sweep deletes uploaded/annotated images older
   than the TTL.
 
-### Observability
+### Observability & monitoring
 - **Structured logging** (levels, timestamps, logger names) replaces `print`.
 - **Request correlation.** Every response carries an `X-Request-ID`; the same id
   prefixes every log line for that request and is surfaced in client errors so a
@@ -290,6 +310,28 @@ bounds, camera-height bounds, FOV, size-category thresholds) also live in
 - **Health & readiness.** `/api/health` is cheap (used by the platform
   healthcheck and returns `503` when the model is not loaded); `/api/ready` also
   verifies the uploads dir is writable.
+- **Prometheus metrics** on `/metrics` (backend port only, never proxied):
+  operational (request rate/latency/error rate, inference duration, process
+  CPU/RSS) and functional ML (confidence distribution, crowns per image,
+  empty-result rate, crown-diameter distribution) — the drift signals the
+  retraining triggers consume. Local Prometheus + Grafana stack with a
+  provisioned dashboard in [`monitoring/`](monitoring/README.md).
+- **Retraining triggers.** [`scripts/retraining/check_triggers.py`](scripts/retraining/check_triggers.py)
+  turns those metrics into a retraining decision (cron/CI-friendly exit codes);
+  strategy and demo walkthrough in [`docs/retraining.md`](docs/retraining.md).
+
+### Model lifecycle
+- **Model registry.** [`backend/weights/registry.json`](backend/weights/registry.json)
+  pins every released model version to a filename, SHA-256, dataset version and
+  eval metrics; `MODEL_VERSION` selects the entry, `/api/metadata` serves it as
+  a model card, and the Settings page displays it live.
+- **Update without rebuild.** A new version is an env change: the backend
+  downloads `MODEL_WEIGHTS_URL` (e.g. an Azure Blob SAS URL) at startup,
+  verifies its hash against the registry, and loads it. Rollback = set the
+  previous `MODEL_VERSION` back.
+- **Dataset registry.** [`data/registry.json`](data/registry.json) versions the
+  training data and links each model version to the exact images it was
+  trained on (tooling in [`scripts/data/`](scripts/data/)).
 
 ---
 
@@ -299,8 +341,10 @@ bounds, camera-height bounds, FOV, size-category thresholds) also live in
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness + model check. `200` when ready, `503` when the model is not loaded. |
 | `GET` | `/api/ready` | Deeper readiness: model loaded **and** uploads dir writable. |
+| `GET` | `/api/metadata` | Model card: app version + git SHA, model version/weights hash/dataset lineage (from the model registry), inference config, API limits. |
 | `POST` | `/api/detect` | Run detection on an uploaded image (auth + rate-limited). |
 | `GET` | `/uploads/...` | Serves saved original and annotated images. |
+| `GET` | `/metrics` | Prometheus metrics (backend port only — deliberately **not** proxied by nginx, so never public). |
 | `GET` | `/docs` | Swagger UI (dev only; hidden in production). |
 
 ### `POST /api/detect`
@@ -413,50 +457,65 @@ A few conventions a new engineer should keep following:
 
 ## Testing
 
-The frontend has a [Vitest](https://vitest.dev) + Testing Library suite covering
+Both suites run before anything is built or deployed — locally via `make test`
+and in CI, where the ACR push is gated on them.
+
+**Backend** — a [pytest](https://pytest.org) suite ([`backend/tests/`](backend/tests/),
+58 tests) covering the service units (size math, filters, rate limiter, upload
+validation, model store incl. a real loopback download), the API contracts
+(health/ready/metadata/metrics, status codes 400/401/413/422/429/503,
+request-id echo), and the model itself (real-weights inference contract,
+end-to-end detect response, integrity fail-closed) — the `model` marker selects
+the weights-heavy tests.
+
+```bash
+make test-backend        # hermetic: runs in a python:3.11-slim container
+# or, with a local Python 3.11 venv:
+cd backend && pip install -r requirements.txt -r requirements-dev.txt && pytest
+```
+
+**Frontend** — a [Vitest](https://vitest.dev) + Testing Library suite covering
 the API client, settings clamping, the error boundary, defensive rendering,
-keyboard accessibility, single-sourced constants, dark-mode FOUC prevention, and
-the upload abort/timeout flow.
+keyboard accessibility, the live-metadata model card (with constant fallback),
+dark-mode FOUC prevention, and the upload abort/timeout flow.
 
 ```bash
-cd frontend
-npm test                 # or: npm run test
+make test-frontend       # hermetic: runs in a node:20-alpine container
+# or: cd frontend && npm ci && npm test
 ```
-
-Zero-install option (run in a throwaway Node container):
-
-```bash
-docker run --rm -v "$PWD/frontend":/app -w /app node:20-alpine \
-  sh -c "npm ci && npm run test"
-```
-
-> The backend does not yet ship an automated test suite; changes have been
-> verified with targeted throwaway scripts. Adding a `pytest` suite (the service
-> layer is structured for it) is the most valuable next testing step.
 
 ---
 
 ## Deployment
 
-Cloud deploys use [`render.yaml`](render.yaml) (a Render Blueprint) - two Docker
-web services, `broccoli-backend` and `broccoli-frontend`. Notable points a
-future maintainer needs to know:
+The cloud target is **Azure Container Apps**, deployed as a single combined
+container ([`Dockerfile.azure`](Dockerfile.azure)): nginx serves the built
+React app and proxies `/api/`+`/uploads/` to a uvicorn bound to loopback
+inside the same container — one published port, the exact trust boundary of
+the two-container setup (the API key nginx injects cannot be bypassed because
+uvicorn is unreachable from outside). The full step-by-step runbook, including
+every Azure command, secrets setup, and the blob-storage model rollout, is in
+[`docs/deployment-azure.md`](docs/deployment-azure.md).
 
-- **API key** is generated by Render on the backend and pulled into the frontend
-  via `fromService`, so the two stay in sync; nginx injects it as `X-API-Key`.
-- **Frontend -> backend over the public URL.** nginx's `resolver` can't use
-  Render's private DNS, so the frontend proxies to the backend's public
-  `*.onrender.com` host. That host is **hardcoded** in `render.yaml`
-  (`BACKEND_HOST`); if the backend is renamed/recreated, update those values or
-  the frontend will proxy to a dead host (502).
-- **`DEPLOY_ENV=production`** hides the API docs.
-- **`EXPECTED_WEIGHTS_SHA256`** is set so a tampered checkpoint is rejected; it is
-  **required in production**, so the backend refuses to start without it. Update it
-  whenever the model is retrained.
-- **Free tier caveat.** YOLO inference needs more CPU than Render's free/starter
-  tiers comfortably provide; for an interactive demo, run locally with
-  `docker compose up`. The single Uvicorn process is intentional - see the
-  rationale in [`backend/Dockerfile`](backend/Dockerfile).
+**CI/CD** ([`.github/workflows/`](.github/workflows/)):
+
+- *B4 BroccoliDetect - CI* — on every push/PR: backend pytest, frontend
+  Vitest, and a no-push build of the deployment image.
+- *B4 BroccoliDetect - Build & Push to ACR* — on push to `main`: the same
+  tests gate a build that is pushed to Azure Container Registry tagged
+  `:latest` **and** `:sha-<commit>`, so any running deployment traces back to
+  an exact commit and rollback is redeploying an older tag. The final
+  `az containerapp update` stays a documented manual step (the course tenant
+  doesn't grant service principals with resource-group rights).
+
+Reproducible entrypoints live in the [`Makefile`](Makefile): `make test`,
+`make build`, `make push`, `make deploy`, `make monitor-up`, `make drift`.
+
+**Render (legacy).** The original two-service Render Blueprint
+([`render.yaml`](render.yaml)) still works; its caveats (hardcoded public
+backend host, free-tier CPU too slow for interactive YOLO inference) are
+documented inline. The single Uvicorn process is intentional everywhere - see
+the rationale in [`backend/Dockerfile`](backend/Dockerfile).
 
 ---
 
@@ -473,8 +532,11 @@ future maintainer needs to know:
 | Deep learning | PyTorch (CPU) | 2.2.2 |
 | Image processing | Pillow + OpenCV (headless) + NumPy | 10.4 / 4.10 / 1.26 |
 | Validation | Pydantic | 2.9 |
+| Backend tests | pytest + httpx | 8.4 / 0.27 |
+| Monitoring | prometheus-client + Prometheus + Grafana | 0.20 / 2.55 / 11.6 |
 | Containers | Docker + Docker Compose | - |
-| Cloud | Render (Blueprint) | - |
+| CI/CD | GitHub Actions → Azure Container Registry | - |
+| Cloud | Azure Container Apps (Render Blueprint kept as legacy) | - |
 
 The model shown in the UI: **YOLOv8n**, ~3.0M parameters, reported
 **mAP@0.5 = 0.976** and **mean IoU = 0.916** on 27 unseen test images from
@@ -499,7 +561,8 @@ Deliverable B (surfaced from
 - Use the original RGB-D depth data instead of the fixed-height assumption.
 - Growth tracking across photos of the same field over time.
 - Batch uploads and CSV export of detections.
-- A backend `pytest` suite.
+- Move rate-limit state to a shared store (Redis) to allow multiple replicas.
+- Automate the last deploy hop once a service principal is available.
 
 ---
 
@@ -515,6 +578,10 @@ Deliverable B (surfaced from
 | Work on UI pages | [`frontend/src/pages/`](frontend/src/pages/) |
 | Change how the UI calls the API | [`frontend/src/api/client.js`](frontend/src/api/client.js) |
 | Adjust the proxy / headers / caching | [`frontend/nginx.conf.template`](frontend/nginx.conf.template) |
+| Release or roll back a model version | [`backend/weights/README.md`](backend/weights/README.md) + [`backend/weights/registry.json`](backend/weights/registry.json) |
+| Deploy to Azure / set up CI secrets | [`docs/deployment-azure.md`](docs/deployment-azure.md) |
+| Add or tune monitoring | [`backend/app/services/metrics.py`](backend/app/services/metrics.py) + [`monitoring/`](monitoring/) |
+| Understand the retraining loop | [`docs/retraining.md`](docs/retraining.md) |
 
 ---
 

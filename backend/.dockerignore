@@ -14,6 +14,12 @@ uploads/
 **/*.py[cod]
 **/.pytest_cache/
 **/.mypy_cache/
+
+# Tests run in CI and via `make test-backend` against the source tree; the
+# runtime image doesn't need them.
+tests/
+pytest.ini
+requirements-dev.txt
 # Local virtualenvs (created at the context root in dev).
 .venv/
 venv/

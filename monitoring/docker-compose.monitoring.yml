@@ -1,0 +1,48 @@
+# Local Prometheus + Grafana monitoring stack for the BroccoliDetect demo.
+#
+# Runs SEPARATELY from the main app so the app does not depend on monitoring
+# being up (and vice versa). Start the main stack first - it creates the
+# broccoli-net network this file attaches to:
+#   docker compose up --build                                # repo root
+#   docker compose -f docker-compose.monitoring.yml up -d    # this directory
+# Then open:
+#   http://localhost:9090  (Prometheus)
+#   http://localhost:3000  (Grafana, dashboard auto-provisioned)
+
+services:
+  prometheus:
+    # Pinned (not :latest) so the demo is reproducible across machines.
+    image: prom/prometheus:v2.55.1
+    container_name: broccoli-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # Read-only: Prometheus has no reason to write back into the repo.
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: broccoli-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Anonymous admin is a DEMO-ONLY convenience: anyone opening :3000 lands
+      # straight on the dashboard with no login step, which is what we want
+      # for a local walkthrough/screencast. Never ship this to production -
+      # it gives every visitor full control of Grafana.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      # Provisioning instead of click-configuration: datasource and dashboard
+      # live in git, so a fresh checkout reproduces the exact same Grafana.
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    restart: unless-stopped
+
+# Join the main app's network (created by the root docker-compose.yml) so
+# Prometheus can scrape "backend:8000" by compose service name.
+networks:
+  default:
+    external: true
+    name: broccoli-net

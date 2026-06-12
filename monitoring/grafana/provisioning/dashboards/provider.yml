@@ -1,0 +1,13 @@
+# File provider: load every dashboard JSON sitting next to this file. Keeping
+# the dashboard in git (instead of editing it in the UI) means review, diffing
+# and reproducible demos; allowUiUpdates stays off so the repo is the source
+# of truth.
+apiVersion: 1
+
+providers:
+  - name: broccoli
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

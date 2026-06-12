@@ -1,0 +1,27 @@
+{
+  "about": "Dataset registry for BroccoliDetect. Each entry pins one immutable dataset version stored in the team's Azure Blob container, so every model version in backend/weights/registry.json can point back to the exact images it was trained and evaluated on. See data/README.md for the add-a-version procedure.",
+  "versions": [
+    {
+      "version": "broccoli-rgb-v1",
+      "description": "RGB field images from Deliverable B: the RGB channel of the original RGB-D capture, annotated with broccoli crown bounding boxes.",
+      "source": "Inholland Robotics | Smart Farming professorship",
+      "storage": {
+        "account": "<team-storage-account>",
+        "container": "datasets",
+        "blob": "broccoli-rgb-v1.zip",
+        "url": "https://<team-storage-account>.blob.core.windows.net/datasets/broccoli-rgb-v1.zip"
+      },
+      "archive_sha256": "99568cde53abfdbde7923b69df5dbd947931c03b71fa8a5d36f8900f6190c076",
+      "num_images": 171,
+      "splits": {
+        "test": 27,
+        "train": 119,
+        "val": 25
+      },
+      "annotation_format": "YOLO txt",
+      "used_by_models": ["v1.0.0"],
+      "created": "2025-11",
+      "notes": "Archived from the team's Roboflow export (workspace broccoli4b, project broccoli-4b, v1): train/valid/test splits with YOLO txt labels and data.yaml; a manifest.json with per-file SHA-256 checksums travels inside the zip. Cross-split duplicate check at archive time found no leakage. Replace the <team-storage-account> placeholder once the archive is uploaded."
+    }
+  ]
+}

@@ -19,6 +19,7 @@ env/
 backend/weights/*
 !backend/weights/best.pt
 !backend/weights/README.md
+!backend/weights/registry.json
 
 # ---------------------------------------------------------------------------
 # Runtime upload storage (keep the empty folder, ignore its contents)
@@ -48,6 +49,9 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Azure deployment settings (copy deploy/azure/azure.env.example, never commit)
+deploy/azure/azure.env
 
 # ---------------------------------------------------------------------------
 # Editor / OS

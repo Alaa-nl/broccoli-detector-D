@@ -1,0 +1,20 @@
+{
+  "_comment": "Model registry: one entry per released model version. The backend loads the entry selected by MODEL_VERSION and verifies the file's SHA-256 against it (env EXPECTED_WEIGHTS_SHA256 overrides). Add a new entry when the model is retrained; never edit a released entry's sha256.",
+  "models": [
+    {
+      "version": "v1.0.0",
+      "file": "best.pt",
+      "sha256": "bf5f8500bba6a3b52bb55aec0212eef64581bff199e0e64a9f42322bf04acf6f",
+      "architecture": "YOLOv8n",
+      "parameters": "3.0M",
+      "dataset_version": "broccoli-rgb-v1",
+      "metrics": {
+        "map50": 0.976,
+        "mean_iou": 0.916,
+        "test_set_size": 27
+      },
+      "created": "2025-11",
+      "notes": "Initial model trained in Deliverable B."
+    }
+  ]
+}

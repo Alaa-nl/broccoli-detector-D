@@ -1,0 +1,39 @@
+# Keeps the repo-root build context (Dockerfile.azure) small and free of
+# secrets. Deliberately does NOT exclude backend/weights: the model ships
+# inside the image, and backend/weights/registry.json must reach the build.
+
+# VCS and tool state — the image gets its commit via the GIT_SHA build arg,
+# not from .git.
+.git
+.github
+**/.DS_Store
+
+# Build outputs and dependency trees that the multi-stage build recreates
+# itself; copying them in would only bust layer caches.
+**/node_modules
+frontend/dist
+frontend/.vite
+
+# Runtime artifacts and local Python state.
+backend/uploads
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+backend/.venv
+.venv
+
+# Tests run in CI and via `make test-backend` against the source tree; the
+# deployment image doesn't need them.
+backend/tests
+backend/pytest.ini
+backend/requirements-dev.txt
+
+# Local environment files: secrets must never end up in an image layer.
+.env
+.env.*
+
+# Not needed inside the deployment image.
+monitoring/
+docs/
+data/
+*.log
