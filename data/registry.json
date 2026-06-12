@@ -11,17 +11,17 @@
         "blob": "broccoli-rgb-v1.zip",
         "url": "https://<team-storage-account>.blob.core.windows.net/datasets/broccoli-rgb-v1.zip"
       },
-      "archive_sha256": null,
-      "num_images": null,
+      "archive_sha256": "99568cde53abfdbde7923b69df5dbd947931c03b71fa8a5d36f8900f6190c076",
+      "num_images": 171,
       "splits": {
         "test": 27,
-        "train": null,
-        "val": null
+        "train": 119,
+        "val": 25
       },
       "annotation_format": "YOLO txt",
       "used_by_models": ["v1.0.0"],
       "created": "2025-11",
-      "notes": "The null fields are unknown until the dataset is archived, because the source images live in the Deliverable B training repo, not here. Only the 27-image test split is certain today. When zipping the dataset, run scripts/data/make_manifest.py (directory mode for the per-file checksums, --archive mode for the zip digest), then fill in archive_sha256, num_images, and the train/val split sizes, and replace the <team-storage-account> placeholder with the real account name."
+      "notes": "Archived from the team's Roboflow export (workspace broccoli4b, project broccoli-4b, v1): train/valid/test splits with YOLO txt labels and data.yaml; a manifest.json with per-file SHA-256 checksums travels inside the zip. Cross-split duplicate check at archive time found no leakage. Replace the <team-storage-account> placeholder once the archive is uploaded."
     }
   ]
 }
