@@ -589,6 +589,17 @@ Deliverable B (surfaced from
 
 ---
 
+## Validation
+
+To verify the model inference locally:
+
+```bash
+conda create -n broccoli python=3.11 -y
+conda activate broccoli
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+pytest backend/tests/test_model_inference.py -v
+
+
 ## Team & licence
 
 **Group B4:** Alaa Aldrobe, Manol Draganov, Diego Baez de la Cruz,
